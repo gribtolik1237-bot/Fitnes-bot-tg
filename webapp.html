@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Твой Тренер — Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #0b0f17;
+    --card: #151c28;
+    --card-border: #232f42;
+    --accent: #10b981;
+    --accent-glow: rgba(16, 185, 129, 0.25);
+    --danger: #ef4444;
+    --warn: #f59e0b;
+    --text: #f8fafc;
+    --muted: #94a3b8;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 0 0 92px 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+    overflow-x: hidden;
+  }
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(11, 15, 23, 0.88);
+    backdrop-filter: blur(12px);
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--card-border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-badge {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: linear-gradient(135deg, #10b981, #059669);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 18px; color: #06281e;
+    box-shadow: 0 0 16px var(--accent-glow);
+  }
+  .brand-title { font-size: 16px; font-weight: 800; letter-spacing: 0.3px; }
+  .brand-sub { font-size: 11px; color: var(--muted); }
+  .timer-pill {
+    background: #1e293b; border: 1px solid #334155;
+    padding: 6px 12px; border-radius: 999px;
+    font-size: 13px; font-weight: 700; color: var(--accent);
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+  }
+  .container { padding: 14px 16px; max-width: 600px; margin: 0 auto; }
+  .quote-box {
+    background: linear-gradient(135deg, rgba(16,185,129,0.14), rgba(15,23,42,0.9));
+    border: 1px solid rgba(16,185,129,0.35);
+    border-radius: 16px; padding: 12px 14px; margin-bottom: 16px;
+    font-size: 13px; line-height: 1.45; color: #e2e8f0;
+  }
+  .quote-box b { color: var(--accent); display: block; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .card {
+    background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 18px; padding: 14px; margin-bottom: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+  }
+  .split-header {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+    margin-bottom: 12px;
+  }
+  .split-title { font-size: 17px; font-weight: 800; line-height: 1.25; }
+  .split-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .mode-switch {
+    display: flex; gap: 8px; margin-bottom: 14px;
+  }
+  .btn {
+    border: none; border-radius: 12px; padding: 11px 14px;
+    font-weight: 700; font-size: 13px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    transition: transform 0.1s ease, opacity 0.15s ease;
+    color: var(--text); background: #1e293b; border: 1px solid #334155;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: #042f2e; border: none;
+    box-shadow: 0 4px 16px var(--accent-glow);
+  }
+  .btn-warn { background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; }
+  .btn-danger { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; }
+  .btn-full { width: 100%; padding: 13px; font-size: 14px; }
+  .ex-card {
+    display: flex; flex-direction: column; gap: 12px;
+    position: relative; overflow: hidden;
+  }
+  .ex-top { display: flex; gap: 12px; align-items: center; }
+  .ex-illust {
+    width: 86px; height: 86px; flex-shrink: 0;
+    background: #0f172a; border: 1px solid #26334d;
+    border-radius: 14px; display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+  }
+  .ex-illust svg { width: 76px; height: 76px; }
+  .ex-info { flex: 1; min-width: 0; }
+  .badge-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 5px; }
+  .badge {
+    font-size: 10px; font-weight: 800; padding: 3px 7px; border-radius: 6px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    background: #1e293b; color: #cbd5e1;
+  }
+  .badge-prio { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.4); }
+  .ex-name { font-size: 15px; font-weight: 800; line-height: 1.25; margin-bottom: 6px; }
+  .ex-targets {
+    display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: #cbd5e1;
+  }
+  .ex-targets span {
+    background: #0f172a; padding: 4px 8px; border-radius: 8px; border: 1px solid #1e293b;
+  }
+  .ex-cues {
+    font-size: 12px; color: var(--muted); background: rgba(15, 23, 42, 0.65);
+    padding: 9px 11px; border-radius: 10px; border-left: 3px solid var(--accent);
+    line-height: 1.4;
+  }
+  .ex-actions {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+  .log-panel {
+    background: #0f172a; border: 1px solid #1e293b; border-radius: 12px;
+    padding: 10px; margin-top: 4px;
+  }
+  .log-inputs {
+    display: grid; grid-template-columns: 1fr 1.6fr; gap: 8px; margin-bottom: 8px;
+  }
+  .input-field {
+    width: 100%; background: #151c28; border: 1px solid #334155;
+    color: var(--text); padding: 9px 10px; border-radius: 10px;
+    font-size: 13px; font-weight: 600;
+  }
+  .input-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; display: block; }
+  .kpi-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px;
+  }
+  .kpi-box {
+    background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 11px;
+  }
+  .kpi-val { font-size: 18px; font-weight: 800; color: var(--accent); }
+  .kpi-lbl { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .chip-grid { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 14px 0; }
+  .chip {
+    padding: 8px 12px; border-radius: 10px; font-size: 12px; font-weight: 700;
+    background: #0f172a; border: 1px solid #26334d; color: #cbd5e1; cursor: pointer;
+  }
+  .chip.active {
+    background: rgba(16, 185, 129, 0.2); border-color: var(--accent); color: #34d399;
+  }
+  .bottom-nav {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
+    background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(14px);
+    border-top: 1px solid var(--card-border);
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    padding: 8px 6px 14px 6px;
+  }
+  .nav-item {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer;
+    padding: 6px 4px; border-radius: 10px;
+  }
+  .nav-item.active { color: var(--accent); }
+  .toast {
+    position: fixed; top: 70px; left: 16px; right: 16px; z-index: 50;
+    background: #064e3b; border: 1px solid #10b981; color: #ecfdf5;
+    padding: 12px 14px; border-radius: 14px; font-size: 13px; font-weight: 600;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: none;
+  }
+  @keyframes pulseGlow {
+    0%, 100% { opacity: 0.55; transform: scale(0.98); }
+    50% { opacity: 1; transform: scale(1.03); }
+  }
+  .muscle-highlight { animation: pulseGlow 2.2s infinite ease-in-out; transform-origin: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-badge">ТТ</div>
+    <div>
+      <div class="brand-title">ТВОЙ ТРЕНЕР</div>
+      <div class="brand-sub" id="hdr-sub">Персональная система гипертрофии</div>
+    </div>
+  </div>
+  <div class="timer-pill" onclick="startRestTimer(90)" id="timer-display">
+    ⏱ <span>Отдых 90с</span>
+  </div>
+</header>
+
+<div id="toast" class="toast"></div>
+
+<div class="container">
+  <div id="tab-workout" class="tab-view"></div>
+  <div id="tab-timers" class="tab-view" style="display:none;"></div>
+  <div id="tab-progress" class="tab-view" style="display:none;"></div>
+  <div id="tab-profile" class="tab-view" style="display:none;"></div>
+</div>
+
+<nav class="bottom-nav">
+  <div class="nav-item active" onclick="switchTab('workout', this)">
+    <span>🏋️</span><span>Тренировка</span>
+  </div>
+  <div class="nav-item" onclick="switchTab('timers', this)">
+    <span>⏱</span><span>Таймер / Чит</span>
+  </div>
+  <div class="nav-item" onclick="switchTab('progress', this)">
+    <span>📈</span><span>Прогресс</span>
+  </div>
+  <div class="nav-item" onclick="switchTab('profile', this)">
+    <span>⚙️</span><span>Анкета</span>
+  </div>
+</nav>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+const urlParams = new URLSearchParams(window.location.search);
+const USER_ID = urlParams.get('uid') || (tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : '5028559439');
+
+let APP_STATE = null;
+let timerInterval = null;
+let timerRemaining = 0;
+
+function showToast(htmlMsg, duration=4000) {
+  const el = document.getElementById('toast');
+  el.innerHTML = htmlMsg;
+  el.style.display = 'block';
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => { el.style.display = 'none'; }, duration);
+}
+
+function startRestTimer(seconds) {
+  clearInterval(timerInterval);
+  timerRemaining = seconds;
+  const pill = document.getElementById('timer-display');
+  updateTimerUI();
+  showToast(`⏱ Таймер отдыха на <b>${seconds} сек</b> запущен!`);
+  timerInterval = setInterval(() => {
+    timerRemaining--;
+    updateTimerUI();
+    if (timerRemaining <= 0) {
+      clearInterval(timerInterval);
+      pill.innerHTML = `⏱ <span>Отдых 90с</span>`;
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('warning');
+      showToast(`🚨 <b>ВРЕМЯ ВЫШЛО (${seconds} сек)!</b> Хватит сидеть в телефоне — под снаряд и за работу!`, 6000);
+    }
+  }, 1000);
+}
+
+function updateTimerUI() {
+  const pill = document.getElementById('timer-display');
+  if (timerRemaining > 0) {
+    const m = Math.floor(timerRemaining / 60);
+    const s = timerRemaining % 60;
+    pill.innerHTML = `🔥 <span>${m}:${s < 10 ? '0'+s : s}</span>`;
+  }
+}
+
+// Наглядные анатомические и снарядные SVG-иллюстрации для каждой группы мышц и упражнений
+function getExerciseIllustration(ex) {
+  const m = ex.muscle;
+  const id = ex.id || '';
+  const c = '#10b981';
+  const dim = '#334155';
+
+  if (m === 'chest') {
+    return `<svg viewBox="0 0 100 100" fill="none">
+      <rect x="12" y="22" width="76" height="8" rx="4" fill="${dim}"/>
+      <rect x="6" y="14" width="8" height="24" rx="3" fill="${c}"/>
+      <rect x="86" y="14" width="8" height="24" rx="3" fill="${c}"/>
+      <path d="M30 44 C30 36, 70 36, 70 44 L66 78 C66 84, 34 84, 34 78 Z" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+      <path class="muscle-highlight" d="M33 45 Q50 52 49 63 Q36 63 33 52 Z" fill="${c}"/>
+      <path class="muscle-highlight" d="M67 45 Q50 52 51 63 Q64 63 67 52 Z" fill="${c}"/>
+      <line x1="26" y1="50" x2="20" y2="26" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+      <line x1="74" y1="50" x2="80" y2="26" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+    </svg>`;
+  }
+  if (m === 'back') {
+    return `<svg viewBox="0 0 100 100" fill="none">
+      <line x1="10" y1="14" x2="90" y2="14" stroke="${dim}" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="50" cy="30" r="8" fill="#64748b"/>
+      <path d="M32 42 L68 42 L60 82 L40 82 Z" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+      <path class="muscle-highlight" d="M32 44 L48 48 L43 74 L35 64 Z" fill="${c}"/>
+      <path class="muscle-highlight" d="M68 44 L52 48 L57 74 L65 64 Z" fill="${c}"/>
+      <path d="M32 44 L22 28 L26 14" stroke="#94a3b8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M68 44 L78 28 L74 14" stroke="#94a3b8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`;
+  }
+  if (m === 'shoulders') {
+    return `<svg viewBox="0 0 100 100" fill="none">
+      <circle cx="50" cy="28" r="9" fill="#64748b"/>
+      <path d="M34 44 L66 44 L62 82 L38 82 Z" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+      <circle class="muscle-highlight" cx="29" cy="47" r="9" fill="${c}"/>
+      <circle class="muscle-highlight" cx="71" cy="47" r="9" fill="${c}"/>
+      <line x1="20" y1="47" x2="10" y2="38" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+      <line x1="80" y1="47" x2="90" y2="38" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+      <rect x="4" y="30" width="8" height="14" rx="2" fill="${c}"/>
+      <rect x="88" y="30" width="8" height="14" rx="2" fill="${c}"/>
+    </svg>`;
+  }
+  if (m === 'biceps' || m === 'triceps') {
+    const isBi = m === 'biceps';
+    return `<svg viewBox="0 0 100 100" fill="none">
+      <circle cx="28" cy="36" r="10" fill="#334155"/>
+      <path d="M28 46 L52 68" stroke="#475569" stroke-width="14" stroke-linecap="round"/>
+      <ellipse class="muscle-highlight" cx="${isBi ? 43 : 35}" cy="${isBi ? 52 : 60}" rx="12" ry="8" transform="rotate(35 40 55)" fill="${c}"/>
+      <path d="M52 68 L74 36" stroke="#94a3b8" stroke-width="11" stroke-linecap="round"/>
+      <rect x="64" y="24" width="22" height="8" rx="3" fill="${c}"/>
+    </svg>`;
+  }
+  if (m === 'quads' || m === 'hamstrings' || m === 'glutes' || m === 'calves') {
+    const isGlute = m === 'glutes';
+    const isCalf = m === 'calves';
+    return `<svg viewBox="0 0 100 100" fill="none">
+      <line x1="16" y1="22" x2="84" y2="22" stroke="#64748b" stroke-width="5" stroke-linecap="round"/>
+      <rect x="10" y="13" width="8" height="18" rx="2" fill="${c}"/>
+      <rect x="82" y="13" width="8" height="18" rx="2" fill="${c}"/>
+      <path d="M40 22 L60 22 L62 46 L38 46 Z" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+      ${isGlute ? `<ellipse class="muscle-highlight" cx="50" cy="46" rx="14" ry="8" fill="${c}"/>` : ''}
+      <path class="${!isGlute && !isCalf ? 'muscle-highlight' : ''}" d="M38 46 L30 70 L42 70 L47 48 Z" fill="${!isGlute && !isCalf ? c : '#334155'}"/>
+      <path class="${!isGlute && !isCalf ? 'muscle-highlight' : ''}" d="M62 46 L70 70 L58 70 L53 48 Z" fill="${!isGlute && !isCalf ? c : '#334155'}"/>
+      <path class="${isCalf ? 'muscle-highlight' : ''}" d="M32 70 L35 90 L42 90 L41 70 Z" fill="${isCalf ? c : '#475569'}"/>
+      <path class="${isCalf ? 'muscle-highlight' : ''}" d="M68 70 L65 90 L58 90 L59 70 Z" fill="${isCalf ? c : '#475569'}"/>
+    </svg>`;
+  }
+  return `<svg viewBox="0 0 100 100" fill="none">
+    <rect x="32" y="18" width="36" height="64" rx="12" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+    <rect class="muscle-highlight" x="39" y="28" width="9" height="10" rx="3" fill="${c}"/>
+    <rect class="muscle-highlight" x="52" y="28" width="9" height="10" rx="3" fill="${c}"/>
+    <rect class="muscle-highlight" x="39" y="42" width="9" height="10" rx="3" fill="${c}"/>
+    <rect class="muscle-highlight" x="52" y="42" width="9" height="10" rx="3" fill="${c}"/>
+    <rect class="muscle-highlight" x="39" y="56" width="9" height="10" rx="3" fill="${c}"/>
+    <rect class="muscle-highlight" x="52" y="56" width="9" height="10" rx="3" fill="${c}"/>
+  </svg>`;
+}
+
+async function fetchState(mode='') {
+  const res = await fetch(`/api/state?uid=${USER_ID}${mode ? '&mode='+mode : ''}`);
+  APP_STATE = await res.json();
+  renderAll();
+}
+
+function switchTab(tab, navEl) {
+  document.querySelectorAll('.tab-view').forEach(el => el.style.display = 'none');
+  document.getElementById('tab-' + tab).style.display = 'block';
+  if (navEl) {
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    navEl.classList.add('active');
+  }
+}
+
+function renderAll() {
+  if (!APP_STATE) return;
+  if (!APP_STATE.has_profile) {
+    renderProfileTab(true);
+    switchTab('profile', document.querySelectorAll('.nav-item')[3]);
+    return;
+  }
+  document.getElementById('hdr-sub').innerText = `${APP_STATE.profile_summary.split_name} • ${APP_STATE.nutrition.kcal} ккал`;
+  renderWorkoutTab();
+  renderTimersTab();
+  renderProgressTab();
+  renderProfileTab(false);
+}
+
+function renderWorkoutTab() {
+  const plan = APP_STATE.plan;
+  const container = document.getElementById('tab-workout');
+  let html = `
+    <div class="quote-box">
+      <b>⚡ Настрой тренера на сегодня</b>
+      ${APP_STATE.quote}
+    </div>
+    <div class="mode-switch">
+      <button class="btn ${plan.workout_type === 'regular' ? 'btn-primary' : ''}" style="flex:1" onclick="fetchState('regular')">
+        🏋️ Полный план
+      </button>
+      <button class="btn ${plan.workout_type === 'express' ? 'btn-primary' : ''}" style="flex:1" onclick="fetchState('express')">
+        ⚡ Экспресс 20 мин
+      </button>
+    </div>
+    <div class="card">
+      <div class="split-header">
+        <div>
+          <div class="split-title">${plan.day_title}</div>
+          <div class="split-meta">${plan.split_name} • ~${plan.est_minutes} мин</div>
+        </div>
+      </div>
+      ${plan.workout_type === 'express' ? `<div style="font-size:12px;color:#fbbf24;margin-bottom:6px;">⚡ Выполняй упражнения внутри суперсета без паузы, отдых между кругами 45 сек!</div>` : ''}
+    </div>
+  `;
+
+  plan.exercises.forEach((ex, idx) => {
+    const unit = ex.is_timed ? 'сек' : 'повт.';
+    const wLabel = ex.target_weight > 0 ? `${ex.target_weight} кг` : 'Свой вес';
+    const defaultRepsStr = Array(ex.sets).fill(ex.target_reps).join(' ');
+    const doneBadge = ex.logged_today ? `<span class="badge badge-prio">✅ ВЫПОЛНЕНО</span>` : '';
+
+    html += `
+      <div class="card ex-card" id="ex-card-${idx}">
+        <div class="ex-top">
+          <div class="ex-illust">
+            ${getExerciseIllustration(ex)}
+          </div>
+          <div class="ex-info">
+            <div class="badge-row">
+              <span class="badge">${APP_STATE.muscle_names[ex.muscle] || ex.muscle}</span>
+              ${ex.is_priority ? `<span class="badge badge-prio">🎯 ПРИОРИТЕТ</span>` : ''}
+              ${doneBadge}
+            </div>
+            <div class="ex-name">${idx + 1}. ${ex.name}</div>
+            <div class="ex-targets">
+              <span>Подходы: <b>${ex.sets} × ${ex.target_reps} ${unit}</b> (${ex.rep_min}–${ex.rep_max})</span>
+              <span>Вес: <b>${wLabel}</b></span>
+              <span onclick="startRestTimer(${ex.rest_sec})" style="cursor:pointer;color:#34d399;">⏱ ${ex.rest_sec}с</span>
+            </div>
+          </div>
+        </div>
+        <div class="ex-cues">💡 <b>Техника:</b> ${ex.cues}</div>
+        <div class="log-panel">
+          <div class="log-inputs">
+            <div>
+              <label class="input-label">Рабочий вес (кг)</label>
+              <input type="number" step="0.5" class="input-field" id="w-${idx}" value="${ex.target_weight}">
+            </div>
+            <div>
+              <label class="input-label">Повторения через пробел (${ex.sets} подх.)</label>
+              <input type="text" class="input-field" id="r-${idx}" value="${defaultRepsStr}">
+            </div>
+          </div>
+          <div class="ex-actions">
+            <button class="btn btn-primary" style="flex:2" onclick="submitExercise(${idx})">
+              ✅ Записать подход
+            </button>
+            <button class="btn" style="flex:1" onclick="swapExercise(${idx})">
+              🔄 Аналог
+            </button>
+            <button class="btn" onclick="startRestTimer(${ex.rest_sec})">
+              ⏱
+            </button>
+          </div>
+          <div id="feedback-${idx}" style="font-size:12px;margin-top:8px;color:#34d399;display:none;"></div>
+        </div>
+      </div>
+    `;
+  });
+
+  html += `
+    <button class="btn btn-primary btn-full" onclick="finishWorkoutSession()">
+      🏁 Завершить тренировку и отправить отчет в Telegram
+    </button>
+  `;
+  container.innerHTML = html;
+}
+
+async function submitExercise(idx) {
+  const wVal = parseFloat(document.getElementById(`w-${idx}`).value || '0');
+  const rRaw = document.getElementById(`r-${idx}`).value || '';
+  const reps = rRaw.trim().split(/[\s,;]+/).map(x => parseInt(x, 10)).filter(x => !isNaN(x) && x > 0);
+  if (!reps.length) {
+    showToast('⚠️ Введи количество повторений через пробел!');
+    return;
+  }
+  const res = await fetch('/api/log_exercise', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ uid: USER_ID, idx, weight: wVal, reps })
+  });
+  const data = await res.json();
+  if (data.ok) {
+    const fb = document.getElementById(`feedback-${idx}`);
+    fb.style.display = 'block';
+    fb.innerHTML = data.message;
+    showToast(data.message);
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    fetchState();
+  }
+}
+
+async function swapExercise(idx) {
+  const res = await fetch('/api/swap', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ uid: USER_ID, idx })
+  });
+  const data = await res.json();
+  showToast(data.message);
+  if (data.ok) fetchState();
+}
+
+async function finishWorkoutSession() {
+  const res = await fetch('/api/finish_workout', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ uid: USER_ID })
+  });
+  const data = await res.json();
+  showToast(data.message, 5000);
+  fetchState();
+}
+
+function renderTimersTab() {
+  const container = document.getElementById('tab-timers');
+  container.innerHTML = `
+    <div class="card">
+      <div class="split-title">⏱ Таймер отдыха между подходами</div>
+      <div class="split-meta" style="margin-bottom:12px;">Выбери время — таймер тикает в верхней шапке приложения.</div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">
+        <button class="btn" onclick="startRestTimer(45)">⚡ 45 сек (Суперсет)</button>
+        <button class="btn" onclick="startRestTimer(60)">⏱ 60 сек (Изоляция)</button>
+        <button class="btn" onclick="startRestTimer(90)">💪 90 сек (Гипертрофия)</button>
+        <button class="btn" onclick="startRestTimer(120)">🏋️ 120 сек (Тяжелая база)</button>
+        <button class="btn" onclick="startRestTimer(150)">🔥 150 сек (Силовой)</button>
+        <button class="btn" onclick="startRestTimer(180)">🦍 180 сек (Максимум)</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="split-title">😩 Хочу пропустить / Нет сил</div>
+      <div class="split-meta" style="margin-bottom:12px;">Нажми, если лень пытается взять верх над дисциплиной.</div>
+      <button class="btn btn-danger btn-full" onclick="triggerExcuse()">
+        🛑 У меня нет сил идти на тренировку
+      </button>
+      <div id="excuse-box" style="margin-top:12px;display:none;" class="quote-box"></div>
+    </div>
+  `;
+}
+
+async function triggerExcuse() {
+  const res = await fetch(`/api/excuse?uid=${USER_ID}`);
+  const data = await res.json();
+  const box = document.getElementById('excuse-box');
+  box.style.display = 'block';
+  box.innerHTML = `<b>🛑 ОТКАЗ В ПРОПУСКЕ</b>${data.message}<br><br>
+    <button class="btn btn-primary btn-full" onclick="switchTab('workout', document.querySelectorAll('.nav-item')[0]);fetchState('express');">
+      ⚡ Запустить Экспресс на 20 мин
+    </button>`;
+}
+
+function renderProgressTab() {
+  const container = document.getElementById('tab-progress');
+  const p = APP_STATE.profile;
+  const nut = APP_STATE.nutrition;
+  const prog = APP_STATE.progress;
+
+  let itemsHtml = '';
+  if (!prog.items.length) {
+    itemsHtml = `<div style="font-size:13px;color:var(--muted);">Пока 0 записанных упражнений. Запиши подходы во вкладке «Тренировка», чтобы включить двойную прогрессию!</div>`;
+  } else {
+    prog.items.forEach(item => {
+      itemsHtml += `
+        <div style="padding:10px 0;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div>
+            <div style="font-size:13px;font-weight:700;">${item.is_priority ? '🎯 ' : '🔹 '}${item.name}</div>
+            <div style="font-size:11px;color:var(--muted);">Старт: ${item.init_w} кг • ~1ПМ: ${item.est_1rm} кг</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:14px;font-weight:800;color:var(--accent);">${item.curr_w} кг</div>
+            <div style="font-size:11px;color:#cbd5e1;">${item.diff >= 0 ? '+'+item.diff : item.diff} кг</div>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  container.innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi-box">
+        <div class="kpi-val">${prog.total_workouts}</div>
+        <div class="kpi-lbl">Закрыто тренировок</div>
+      </div>
+      <div class="kpi-box">
+        <div class="kpi-val">${p.weight} кг</div>
+        <div class="kpi-lbl">Вес тела (старт: ${p.initial_body_weight || p.weight} кг)</div>
+      </div>
+      <div class="kpi-box">
+        <div class="kpi-val">${nut.kcal} ккал</div>
+        <div class="kpi-lbl">Суточная норма под цель</div>
+      </div>
+      <div class="kpi-box">
+        <div class="kpi-val">${nut.protein}г / ${nut.fat}г / ${nut.carbs}г</div>
+        <div class="kpi-lbl">Белки / Жиры / Углеводы</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="split-title" style="margin-bottom:8px;">⚖️ Обновить собственный вес тела</div>
+      <div style="display:flex;gap:8px;">
+        <input type="number" step="0.1" id="new-bw-input" class="input-field" value="${p.weight}">
+        <button class="btn btn-primary" onclick="saveNewBodyWeight()">Сохранить</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="split-title" style="margin-bottom:8px;">📈 Рост рабочих весов и 1ПМ</div>
+      ${itemsHtml}
+    </div>
+  `;
+}
+
+async function saveNewBodyWeight() {
+  const w = parseFloat(document.getElementById('new-bw-input').value || '0');
+  if (w < 35 || w > 250) { showToast('⚠️ Укажи реальный вес от 35 до 250 кг'); return; }
+  const res = await fetch('/api/bodyweight', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ uid: USER_ID, weight: w })
+  });
+  const data = await res.json();
+  showToast(data.message);
+  fetchState();
+}
+
+function renderProfileTab(isFirstRun) {
+  const container = document.getElementById('tab-profile');
+  const p = APP_STATE.profile || {
+    gender: 'Мужской', age: 22, height: 178, weight: 75,
+    goal: 'mass', priority_muscles: ['chest', 'back'],
+    level: 'intermediate', equipment: 'gym',
+    training_days: [0, 2, 4], duration: 60, injuries: [], timezone: 'Europe/Moscow'
+  };
+
+  window._formState = JSON.parse(JSON.stringify(p));
+
+  const muscleChips = Object.entries(APP_STATE.muscle_names).map(([k, lbl]) =>
+    `<div class="chip ${p.priority_muscles.includes(k) ? 'active' : ''}" onclick="toggleArrayItem('priority_muscles', '${k}', 3, this)">${lbl}</div>`
+  ).join('');
+
+  const dayChips = Object.entries(APP_STATE.weekday_names).map(([k, lbl]) =>
+    `<div class="chip ${p.training_days.includes(parseInt(k)) ? 'active' : ''}" onclick="toggleArrayItem('training_days', ${parseInt(k)}, 7, this)">${lbl}</div>`
+  ).join('');
+
+  const injChips = Object.entries(APP_STATE.injury_names).map(([k, lbl]) =>
+    `<div class="chip ${p.injuries.includes(k) ? 'active' : ''}" onclick="toggleArrayItem('injuries', '${k}', 4, this)">${lbl}</div>`
+  ).join('');
+
+  container.innerHTML = `
+    <div class="card">
+      <div class="split-title">${isFirstRun ? '🔥 Первичная настройка атлета' : '⚙️ Твоя анкета и цели'}</div>
+      <div class="split-meta" style="margin-bottom:14px;">Алгоритм мгновенно пересчитает сплит, КБЖУ и рабочие подходы.</div>
+
+      <div class="log-inputs">
+        <div>
+          <label class="input-label">Пол</label>
+          <select id="pf-gender" class="input-field">
+            <option value="Мужской" ${p.gender==='Мужской'?'selected':''}>Мужской</option>
+            <option value="Женский" ${p.gender==='Женский'?'selected':''}>Женский</option>
+          </select>
+        </div>
+        <div>
+          <label class="input-label">Возраст (лет)</label>
+          <input type="number" id="pf-age" class="input-field" value="${p.age}">
+        </div>
+      </div>
+
+      <div class="log-inputs">
+        <div>
+          <label class="input-label">Рост (см)</label>
+          <input type="number" id="pf-height" class="input-field" value="${p.height}">
+        </div>
+        <div>
+          <label class="input-label">Вес (кг)</label>
+          <input type="number" step="0.1" id="pf-weight" class="input-field" value="${p.weight}">
+        </div>
+      </div>
+
+      <label class="input-label">Главная цель</label>
+      <select id="pf-goal" class="input-field" style="margin-bottom:10px;">
+        <option value="mass" ${p.goal==='mass'?'selected':''}>💪 Набор мышечной массы</option>
+        <option value="cut" ${p.goal==='cut'?'selected':''}>🔥 Рельеф и жиросжигание</option>
+        <option value="strength" ${p.goal==='strength'?'selected':''}>🏋️ Максимальная сила</option>
+      </select>
+
+      <label class="input-label">Приоритетные мышцы (1–3 группы, идут первыми + доп. объем)</label>
+      <div class="chip-grid">${muscleChips}</div>
+
+      <div class="log-inputs">
+        <div>
+          <label class="input-label">Уровень</label>
+          <select id="pf-level" class="input-field">
+            <option value="beginner" ${p.level==='beginner'?'selected':''}>Новичок</option>
+            <option value="intermediate" ${p.level==='intermediate'?'selected':''}>Средний</option>
+            <option value="advanced" ${p.level==='advanced'?'selected':''}>Продвинутый</option>
+          </select>
+        </div>
+        <div>
+          <label class="input-label">Инвентарь</label>
+          <select id="pf-equip" class="input-field">
+            <option value="gym" ${p.equipment==='gym'?'selected':''}>Тренажерный зал</option>
+            <option value="street" ${p.equipment==='street'?'selected':''}>Турники и брусья</option>
+            <option value="dumbbells" ${p.equipment==='dumbbells'?'selected':''}>Гантели дома</option>
+            <option value="bodyweight" ${p.equipment==='bodyweight'?'selected':''}>Только свой вес</option>
+          </select>
+        </div>
+      </div>
+
+      <label class="input-label">Дни тренировок (контроль в 09:00 и 20:00)</label>
+      <div class="chip-grid">${dayChips}</div>
+
+      <div class="log-inputs">
+        <div>
+          <label class="input-label">Длительность</label>
+          <select id="pf-dur" class="input-field">
+            <option value="30" ${p.duration==30?'selected':''}>30 мин</option>
+            <option value="45" ${p.duration==45?'selected':''}>45 мин</option>
+            <option value="60" ${p.duration==60?'selected':''}>60 мин</option>
+            <option value="90" ${p.duration==90?'selected':''}>90 мин</option>
+          </select>
+        </div>
+        <div>
+          <label class="input-label">Часовой пояс</label>
+          <select id="pf-tz" class="input-field">
+            <option value="Europe/Kaliningrad" ${p.timezone==='Europe/Kaliningrad'?'selected':''}>МСК-1</option>
+            <option value="Europe/Moscow" ${p.timezone==='Europe/Moscow'?'selected':''}>МСК</option>
+            <option value="Europe/Samara" ${p.timezone==='Europe/Samara'?'selected':''}>МСК+1</option>
+            <option value="Asia/Yekaterinburg" ${p.timezone==='Asia/Yekaterinburg'?'selected':''}>МСК+2</option>
+            <option value="Asia/Omsk" ${p.timezone==='Asia/Omsk'?'selected':''}>МСК+3</option>
+            <option value="Asia/Krasnoyarsk" ${p.timezone==='Asia/Krasnoyarsk'?'selected':''}>МСК+4</option>
+            <option value="Asia/Irkutsk" ${p.timezone==='Asia/Irkutsk'?'selected':''}>МСК+5</option>
+            <option value="Asia/Vladivostok" ${p.timezone==='Asia/Vladivostok'?'selected':''}>МСК+7</option>
+          </select>
+        </div>
+      </div>
+
+      <label class="input-label">Травмы / ограничения (исключат опасную базу)</label>
+      <div class="chip-grid">${injChips}</div>
+
+      <button class="btn btn-primary btn-full" onclick="saveProfileForm()">
+        ✅ Сохранить анкету и пересчитать программу
+      </button>
+    </div>
+  `;
+}
+
+function toggleArrayItem(field, val, maxLen, el) {
+  const arr = window._formState[field];
+  const idx = arr.indexOf(val);
+  if (idx >= 0) {
+    arr.splice(idx, 1);
+    el.classList.remove('active');
+  } else {
+    if (arr.length >= maxLen) {
+      showToast(`⚠️ Можно выбрать максимум ${maxLen}!`);
+      return;
+    }
+    arr.push(val);
+    el.classList.add('active');
+  }
+}
+
+async function saveProfileForm() {
+  const st = window._formState;
+  if (!st.priority_muscles.length) { showToast('⚠️ Выбери хотя бы 1 приоритетную мышцу!'); return; }
+  if (!st.training_days.length) { showToast('⚠️ Выбери хотя бы 1 день тренировок!'); return; }
+
+  const payload = {
+    uid: USER_ID,
+    gender: document.getElementById('pf-gender').value,
+    age: parseInt(document.getElementById('pf-age').value || '22'),
+    height: parseInt(document.getElementById('pf-height').value || '178'),
+    weight: parseFloat(document.getElementById('pf-weight').value || '75'),
+    goal: document.getElementById('pf-goal').value,
+    priority_muscles: st.priority_muscles,
+    level: document.getElementById('pf-level').value,
+    equipment: document.getElementById('pf-equip').value,
+    training_days: st.training_days,
+    duration: parseInt(document.getElementById('pf-dur').value || '60'),
+    injuries: st.injuries,
+    timezone: document.getElementById('pf-tz').value
+  };
+
+  const res = await fetch('/api/save_profile', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (data.ok) {
+    showToast('✅ Профиль сохранен! Сплит и рабочие веса готовы.');
+    await fetchState();
+    switchTab('workout', document.querySelectorAll('.nav-item')[0]);
+  }
+}
+
+fetchState();
+</script>
+</body>
+</html>

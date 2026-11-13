@@ -716,8 +716,11 @@ class BodyWeightFlow(StatesGroup):
 
 
 def main_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    rows = []
+    w_url = get_webapp_url()
+    if w_url:
+        rows.append([InlineKeyboardButton(text="📱 Открыть Mini App (с картинками)", web_app=WebAppInfo(url=w_url))])
+    rows.extend([
             [InlineKeyboardButton(text="🏋️ План на сегодня", callback_data="menu:plan")],
             [InlineKeyboardButton(text="📝 Сдать отчет по тренировке", callback_data="menu:report")],
             [InlineKeyboardButton(text="⚡ Мало времени (экспресс на 20 мин)", callback_data="menu:express")],
@@ -726,6 +729,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⚙️ Обновить анкету / цели", callback_data="menu:reconfig")],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def plan_menu_kb() -> InlineKeyboardMarkup:
@@ -1344,6 +1348,200 @@ async def hourly_discipline_check(bot: Bot) -> None:
         logging.error(f"Ошибка планировщика: {exc}")
 
 
+
+from aiohttp import web
+from aiogram.types import WebAppInfo, MenuButtonWebApp
+
+WEBAPP_PORT = int(os.getenv("PORT", os.getenv("SERVER_PORT", "8080")))
+WEBAPP_PUBLIC_URL = os.getenv("WEBAPP_URL", "").rstrip("/")
+
+
+def get_webapp_url(req: web.Request | None = None) -> str:
+    if WEBAPP_PUBLIC_URL:
+        return f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}"
+    if req is not None:
+        host = req.headers.get("X-Forwarded-Host") or req.host
+        return f"https://{host}/?uid={ADMIN_TELEGRAM_ID}"
+    for env_key in ("BOTHOST_DOMAIN", "DOMAIN", "APP_URL", "PUBLIC_URL", "RENDER_EXTERNAL_URL"):
+        val = os.getenv(env_key, "").strip().rstrip("/")
+        if val:
+            if not val.startswith("http"):
+                val = f"https://{val}"
+            return f"{val}/?uid={ADMIN_TELEGRAM_ID}"
+    return ""
+
+
+async def handle_index(request: web.Request) -> web.Response:
+    # Запоминаем домен автоматически при первом же открытии
+    global WEBAPP_PUBLIC_URL
+    if not WEBAPP_PUBLIC_URL and request.host and not request.host.startswith("127.") and not request.host.startswith("0.0.0.0"):
+        WEBAPP_PUBLIC_URL = f"https://{request.host}"
+    html_path = os.path.join(os.path.dirname(__file__) or ".", "webapp.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return web.Response(text=content, content_type="text/html")
+
+
+async def handle_api_state(request: web.Request) -> web.Response:
+    mode = request.query.get("mode", "active")
+    if mode not in ("regular", "express", "active"):
+        mode = "active"
+    profile = get_profile(ADMIN_TELEGRAM_ID)
+    if not profile:
+        return web.json_response({
+            "has_profile": False,
+            "muscle_names": MUSCLE_NAMES,
+            "weekday_names": WEEKDAY_NAMES,
+            "injury_names": INJURY_NAMES,
+        })
+
+    plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode=mode)
+    split_name, _ = determine_split(profile)
+    nut = calculate_nutrition(profile)
+
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM exercise_progress WHERE initial_weight IS NOT NULL ORDER BY last_updated DESC").fetchall()
+        total_workouts = conn.execute("SELECT COUNT(*) AS cnt FROM workout_logs").fetchone()["cnt"]
+
+    priority = set(profile["priority_muscles"])
+    prog_items = []
+    for r in rows:
+        ex = EXERCISE_MAP.get(r["exercise_id"])
+        if not ex:
+            continue
+        init_w = float(r["initial_weight"] or 0.0)
+        curr_w = float(r["current_weight"] or 0.0)
+        est_1rm = round(curr_w * (1 + int(r["target_reps"]) / 30.0), 1) if curr_w > 0 else 0.0
+        prog_items.append({
+            "id": ex["id"],
+            "name": ex["name"],
+            "is_priority": ex["muscle"] in priority,
+            "init_w": init_w,
+            "curr_w": curr_w,
+            "diff": round(curr_w - init_w, 1),
+            "est_1rm": est_1rm,
+        })
+
+    return web.json_response({
+        "has_profile": True,
+        "profile": profile,
+        "profile_summary": {"split_name": split_name},
+        "nutrition": nut,
+        "plan": plan,
+        "quote": random.choice(MORNING_QUOTES),
+        "progress": {"total_workouts": total_workouts, "items": prog_items},
+        "muscle_names": MUSCLE_NAMES,
+        "weekday_names": WEEKDAY_NAMES,
+        "injury_names": INJURY_NAMES,
+    })
+
+
+async def handle_api_log_exercise(request: web.Request) -> web.Response:
+    body = await request.json()
+    idx = int(body.get("idx", 0))
+    weight = float(body.get("weight", 0.0))
+    reps = [int(x) for x in body.get("reps", []) if int(x) > 0]
+
+    plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode="active")
+    exercises = plan["exercises"]
+    if not (0 <= idx < len(exercises)):
+        return web.json_response({"ok": False, "message": "Упражнение не найдено."})
+
+    ex_item = exercises[idx]
+    msg = apply_double_progression(ex_item, weight, reps)
+    ex_item["logged_today"] = True
+    ex_item["logged_weight"] = weight
+    ex_item["logged_reps"] = reps
+
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE active_workouts SET plan_json = ? WHERE user_id = ?",
+            (json.dumps(plan, ensure_ascii=False), ADMIN_TELEGRAM_ID),
+        )
+    return web.json_response({"ok": True, "message": msg})
+
+
+async def handle_api_swap(request: web.Request) -> web.Response:
+    body = await request.json()
+    idx = int(body.get("idx", 0))
+    ok, msg, _ = swap_exercise_in_plan(ADMIN_TELEGRAM_ID, idx)
+    return web.json_response({"ok": ok, "message": msg})
+
+
+async def handle_api_finish_workout(request: web.Request) -> web.Response:
+    profile = get_profile(ADMIN_TELEGRAM_ID)
+    plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode="active")
+    logged = [
+        {"id": ex["id"], "name": ex["name"], "weight": ex.get("logged_weight", ex["target_weight"]), "reps": ex.get("logged_reps", [ex["target_reps"]] * ex["sets"])}
+        for ex in plan["exercises"] if ex.get("logged_today")
+    ]
+    if not logged:
+        # Если нажал завершить сразу — засчитываем выполнение по плану
+        for ex in plan["exercises"]:
+            apply_double_progression(ex, float(ex["target_weight"]), [int(ex["target_reps"])] * int(ex["sets"]))
+            logged.append({"id": ex["id"], "name": ex["name"], "weight": ex["target_weight"], "reps": [ex["target_reps"]] * ex["sets"]})
+
+    save_workout_log(plan["workout_type"], logged, profile)
+    if plan["workout_type"] == "regular":
+        increment_workout_counter(ADMIN_TELEGRAM_ID)
+
+    praise = random.choice(REPORT_PRAISE_QUOTES)
+    bot_inst: Bot | None = request.app.get("bot")
+    if bot_inst:
+        try:
+            await bot_inst.send_message(
+                chat_id=ADMIN_TELEGRAM_ID,
+                text=f"🏁 <b>ТРЕНИРОВКА В MINI APP ЗАКРЫТА!</b>\nВыполнено упражнений: <b>{len(logged)}/{len(plan['exercises'])}</b>.\n\n{praise}",
+                reply_markup=main_menu_kb(),
+            )
+        except Exception:
+            pass
+    return web.json_response({"ok": True, "message": f"🏁 Тренировка закрыта! {praise}"})
+
+
+async def handle_api_excuse(request: web.Request) -> web.Response:
+    return web.json_response({"ok": True, "message": random.choice(EXCUSE_RESPONSES)})
+
+
+async def handle_api_bodyweight(request: web.Request) -> web.Response:
+    body = await request.json()
+    w = float(body.get("weight", 75.0))
+    init_bw, curr_bw = update_body_weight(ADMIN_TELEGRAM_ID, w)
+    diff = curr_bw - init_bw
+    sign = "+" if diff > 0 else ""
+    return web.json_response({"ok": True, "message": f"✅ Вес сохранен: {curr_bw:g} кг ({sign}{diff:g} кг от старта)"})
+
+
+async def handle_api_save_profile(request: web.Request) -> web.Response:
+    body = await request.json()
+    save_profile(ADMIN_TELEGRAM_ID, body)
+    return web.json_response({"ok": True})
+
+
+@router.message(Command("domain"))
+async def cmd_set_domain(message: Message) -> None:
+    global WEBAPP_PUBLIC_URL
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Отправь ссылку на домен Bothost так: <code>/domain https://bot1234.bothost.tech</code>")
+        return
+    url = parts[1].strip().rstrip("/")
+    if not url.startswith("http"):
+        url = f"https://{url}"
+    WEBAPP_PUBLIC_URL = url
+    try:
+        await message.bot.set_chat_menu_button(
+            chat_id=ADMIN_TELEGRAM_ID,
+            menu_button=MenuButtonWebApp(text="📱 Тренер App", web_app=WebAppInfo(url=f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}")),
+        )
+    except Exception:
+        pass
+    await message.answer(
+        f"✅ <b>Mini App успешно привязан к кнопке меню!</b>\nОткрой приложение кнопкой ниже:",
+        reply_markup=main_menu_kb(),
+    )
+
+
 async def main() -> None:
     init_db()
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -1352,13 +1550,42 @@ async def main() -> None:
     dp.callback_query.middleware(AdminOnlyMiddleware())
     dp.include_router(router)
 
+    # Запускаем встроенный веб-сервер для Telegram Mini App
+    app = web.Application()
+    app["bot"] = bot
+    app.router.add_get("/", handle_index)
+    app.router.add_get("/api/state", handle_api_state)
+    app.router.add_post("/api/log_exercise", handle_api_log_exercise)
+    app.router.add_post("/api/swap", handle_api_swap)
+    app.router.add_post("/api/finish_workout", handle_api_finish_workout)
+    app.router.add_get("/api/excuse", handle_api_excuse)
+    app.router.add_post("/api/bodyweight", handle_api_bodyweight)
+    app.router.add_post("/api/save_profile", handle_api_save_profile)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=WEBAPP_PORT)
+    await site.start()
+    logging.info(f"Mini App веб-сервер запущен на порту {WEBAPP_PORT}")
+
+    w_url = get_webapp_url()
+    if w_url:
+        try:
+            await bot.set_chat_menu_button(
+                chat_id=ADMIN_TELEGRAM_ID,
+                menu_button=MenuButtonWebApp(text="📱 Тренер App", web_app=WebAppInfo(url=w_url)),
+            )
+        except Exception as e:
+            logging.warning(f"Не удалось установить кнопку меню: {e}")
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(hourly_discipline_check, "cron", minute=0, args=[bot])
     scheduler.start()
 
     await bot.delete_webhook(drop_pending_updates=True)
-    logging.info("Бот-тренер запущен и следит за дисциплиной.")
+    logging.info("Бот-тренер + Mini App запущены и следят за дисциплиной.")
     await dp.start_polling(bot)
+
 
 
 if __name__ == "__main__":
