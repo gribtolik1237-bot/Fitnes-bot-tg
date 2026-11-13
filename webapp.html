@@ -495,10 +495,18 @@ let timerTotal = 90;
 let autoTimerEnabled = true;
 let warmupOpen = false;
 
+const DEFAULT_EQUIP_NAMES = {
+  gym: "Тренажерный зал",
+  street: "Турники и брусья",
+  dumbbells: "Гантели дома",
+  bodyweight: "Только свой вес"
+};
+
 const PURE_BODYWEIGHT_IDS = new Set([
   "chest_pushups", "chest_decline_pushups",
-  "back_australian_pullups", "back_floor_swimmers",
-  "sh_pike_pushups",
+  "back_australian_pullups", "back_floor_swimmers", "back_towel_row",
+  "sh_pike_pushups", "sh_bw_rear_raise",
+  "bi_bw_self_resist_curl",
   "tri_bench_dips", "tri_diamond_pushups",
   "quads_bw_squat", "quads_wall_sit",
   "ham_single_leg_bridge", "ham_slider_curls",
@@ -509,7 +517,8 @@ const PURE_BODYWEIGHT_IDS = new Set([
 
 function isBodyweightExercise(ex) {
   if (!APP_STATE || !APP_STATE.profile) return PURE_BODYWEIGHT_IDS.has(ex.id);
-  if (APP_STATE.profile.equipment === 'bodyweight') return true;
+  const eq = Array.isArray(APP_STATE.profile.equipment) ? APP_STATE.profile.equipment : [APP_STATE.profile.equipment];
+  if (eq.length === 1 && eq[0] === 'bodyweight') return true;
   return PURE_BODYWEIGHT_IDS.has(ex.id);
 }
 
@@ -611,7 +620,6 @@ function updateTimerUI() {
   }
 }
 
-// НАГЛЯДНЫЕ АНИМИРОВАННЫЕ СХЕМЫ БИОМЕХАНИКИ ДЛЯ ВСЕХ 65 УПРАЖНЕНИЙ
 function getBiomechanicsSVG(ex) {
   const id = ex.id || '';
   const m = ex.muscle;
@@ -620,7 +628,6 @@ function getBiomechanicsSVG(ex) {
   const joint = '#cbd5e1';
   const floor = '#283244';
 
-  // 1. Отжимания (от пола, с ногами на скамье, алмазные, домиком)
   if (id.includes('pushup')) {
     const isDecline = id.includes('decline');
     const isPike = id.includes('pike');
@@ -641,7 +648,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 2. Брусья
   if (id.includes('dips')) {
     return `<svg viewBox="0 0 320 146" fill="none">
       <line x1="115" y1="74" x2="115" y2="128" stroke="#334155" stroke-width="5" stroke-linecap="round"/>
@@ -658,7 +664,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 3. Пресс (Планка / Подъем ног / Скручивания)
   if (m === 'abs') {
     if (id.includes('plank')) {
       return `<svg viewBox="0 0 320 146" fill="none">
@@ -695,7 +700,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 4. Жим лежа / Разводка (Грудь)
   if (m === 'chest') {
     return `<svg viewBox="0 0 320 146" fill="none">
       <rect x="75" y="102" width="160" height="8" rx="4" fill="#1e293b" stroke="#334155" stroke-width="2"/>
@@ -711,7 +715,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 5. Спина (Тяги vs Подтягивания)
   if (m === 'back') {
     if (id.includes('row') || id.includes('swimmers')) {
       return `<svg viewBox="0 0 320 146" fill="none">
@@ -740,7 +743,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 6. Плечи (Махи vs Жимы)
   if (m === 'shoulders') {
     if (id.includes('raise') || id.includes('fly') || id.includes('rear')) {
       return `<svg viewBox="0 0 320 146" fill="none">
@@ -774,7 +776,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 7. Бицепс / Трицепс
   if (m === 'biceps' || m === 'triceps') {
     const isTri = m === 'triceps';
     return `<svg viewBox="0 0 320 146" fill="none">
@@ -790,7 +791,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 8. Ягодичный мостик / Hip Thrust
   if (m === 'glutes' && (id.includes('thrust') || id.includes('bridge'))) {
     return `<svg viewBox="0 0 320 146" fill="none">
       <line x1="20" y1="124" x2="300" y2="124" stroke="${floor}" stroke-width="3" stroke-linecap="round"/>
@@ -804,7 +804,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 9. Румынская тяга / Сгибания ног (Бицепс бедра)
   if (m === 'hamstrings') {
     return `<svg viewBox="0 0 320 146" fill="none">
       <line x1="40" y1="126" x2="280" y2="126" stroke="${floor}" stroke-width="3" stroke-linecap="round"/>
@@ -819,7 +818,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 10. Икры (Подъемы на носки на ступеньке)
   if (m === 'calves') {
     return `<svg viewBox="0 0 320 146" fill="none">
       <rect x="115" y="112" width="60" height="14" rx="3" fill="#1e293b" stroke="#334155" stroke-width="2"/>
@@ -832,7 +830,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 11. Стульчик у стены (статика)
   if (id.includes('wall_sit')) {
     return `<svg viewBox="0 0 320 146" fill="none">
       <line x1="115" y1="20" x2="115" y2="124" stroke="#334155" stroke-width="4" stroke-linecap="round"/>
@@ -845,7 +842,6 @@ function getBiomechanicsSVG(ex) {
     </svg>`;
   }
 
-  // 12. Квадрицепсы (Приседания и жимы ногами)
   return `<svg viewBox="0 0 320 146" fill="none">
     <line x1="60" y1="126" x2="260" y2="126" stroke="${floor}" stroke-width="3" stroke-linecap="round"/>
     <g class="anim-squat">
@@ -858,7 +854,6 @@ function getBiomechanicsSVG(ex) {
   </svg>`;
 }
 
-// МОДАЛЬНОЕ ОКНО: РАЗБОР ТЕХНИКИ + РАЗМИНКА + КАЛЬКУЛЯТОР БЛИНОВ
 function openExerciseModal(idx) {
   const ex = APP_STATE.plan.exercises[idx];
   if (!ex) return;
@@ -1411,17 +1406,27 @@ async function saveNewBodyWeight() {
 
 function renderProfileTab(isFirstRun) {
   const container = document.getElementById('tab-profile');
-  const p = APP_STATE.profile || {
+  const rawP = APP_STATE.profile || {
     gender: 'Мужской', age: 22, height: 178, weight: 75,
     goal: 'mass', priority_muscles: ['chest', 'back'],
-    level: 'intermediate', equipment: 'gym',
+    level: 'intermediate', equipment: ['gym'],
     training_days: [0, 2, 4], duration: 60, injuries: [], timezone: 'Europe/Moscow'
   };
 
-  window._formState = JSON.parse(JSON.stringify(p));
+  const p = JSON.parse(JSON.stringify(rawP));
+  if (!Array.isArray(p.equipment)) {
+    p.equipment = p.equipment ? [p.equipment] : ['gym'];
+  }
+  window._formState = p;
+
+  const eqMap = APP_STATE.equipment_names || DEFAULT_EQUIP_NAMES;
 
   const muscleChips = Object.entries(APP_STATE.muscle_names).map(([k, lbl]) =>
     `<div class="chip ${p.priority_muscles.includes(k) ? 'active' : ''}" onclick="toggleArrayItem('priority_muscles', '${k}', 3, this)">${lbl}</div>`
+  ).join('');
+
+  const equipChips = Object.entries(eqMap).map(([k, lbl]) =>
+    `<div class="chip ${p.equipment.includes(k) ? 'active' : ''}" onclick="toggleArrayItem('equipment', '${k}', 4, this)">${lbl}</div>`
   ).join('');
 
   const dayChips = Object.entries(APP_STATE.weekday_names).map(([k, lbl]) =>
@@ -1473,25 +1478,15 @@ function renderProfileTab(isFirstRun) {
       <label class="f-label">Приоритетные мышцы (1–3 группы, идут первыми)</label>
       <div class="chips">${muscleChips}</div>
 
-      <div class="form-row">
-        <div>
-          <label class="f-label">Уровень</label>
-          <select id="pf-level" class="f-input">
-            <option value="beginner" ${p.level==='beginner'?'selected':''}>Новичок</option>
-            <option value="intermediate" ${p.level==='intermediate'?'selected':''}>Средний</option>
-            <option value="advanced" ${p.level==='advanced'?'selected':''}>Продвинутый</option>
-          </select>
-        </div>
-        <div>
-          <label class="f-label">Где тренируешься</label>
-          <select id="pf-equip" class="f-input">
-            <option value="gym" ${p.equipment==='gym'?'selected':''}>Тренажерный зал</option>
-            <option value="street" ${p.equipment==='street'?'selected':''}>Турники и брусья</option>
-            <option value="dumbbells" ${p.equipment==='dumbbells'?'selected':''}>Гантели дома</option>
-            <option value="bodyweight" ${p.equipment==='bodyweight'?'selected':''}>Только свой вес</option>
-          </select>
-        </div>
-      </div>
+      <label class="f-label">Уровень подготовки</label>
+      <select id="pf-level" class="f-input" style="margin-bottom:12px;">
+        <option value="beginner" ${p.level==='beginner'?'selected':''}>Новичок</option>
+        <option value="intermediate" ${p.level==='intermediate'?'selected':''}>Средний</option>
+        <option value="advanced" ${p.level==='advanced'?'selected':''}>Продвинутый</option>
+      </select>
+
+      <label class="f-label">Где тренируешься / инвентарь (можно выбрать 2 и более)</label>
+      <div class="chips">${equipChips}</div>
 
       <label class="f-label">Дни тренировок (напоминания в 09:00 и 20:00)</label>
       <div class="chips">${dayChips}</div>
@@ -1551,6 +1546,7 @@ function toggleArrayItem(field, val, maxLen, el) {
 async function saveProfileForm() {
   const st = window._formState;
   if (!st.priority_muscles.length) { showToast('⚠️ Выбери хотя бы 1 приоритетную мышцу!'); return; }
+  if (!st.equipment.length) { showToast('⚠️ Выбери хотя бы 1 место тренировок / инвентарь!'); return; }
   if (!st.training_days.length) { showToast('⚠️ Выбери хотя бы 1 день тренировок!'); return; }
 
   const payload = {
@@ -1562,7 +1558,7 @@ async function saveProfileForm() {
     goal: document.getElementById('pf-goal').value,
     priority_muscles: st.priority_muscles,
     level: document.getElementById('pf-level').value,
-    equipment: document.getElementById('pf-equip').value,
+    equipment: st.equipment,
     training_days: st.training_days,
     duration: parseInt(document.getElementById('pf-dur').value || '60'),
     injuries: st.injuries,

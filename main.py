@@ -17,7 +17,8 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, MenuButtonWebApp, Message, WebAppInfo
+from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from data_bank import (
@@ -43,6 +44,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "9294187240:AAEjife-h5vu5j2yo92k8q5J8Lk7yI-0t
 ADMIN_TELEGRAM_ID = 5028559439
 DEFAULT_TIMEZONE = "Europe/Moscow"
 DB_PATH = "coach_bot.db"
+
+WEBAPP_PORT = int(os.getenv("PORT", os.getenv("SERVER_PORT", "8080")))
+WEBAPP_PUBLIC_URL = os.getenv("WEBAPP_URL", "").rstrip("/")
 
 EXERCISE_MAP = {ex["id"]: ex for ex in EXERCISES}
 ACTIVE_TIMERS: dict[int, asyncio.Task] = {}
@@ -119,6 +123,25 @@ def init_db() -> None:
             conn.execute("ALTER TABLE exercise_progress ADD COLUMN fail_streak INTEGER NOT NULL DEFAULT 0;")
 
 
+def normalize_equipment(raw_eq) -> list[str]:
+    if isinstance(raw_eq, list):
+        cleaned = [str(x) for x in raw_eq if str(x) in EQUIPMENT_NAMES]
+        return cleaned or ["bodyweight"]
+    if isinstance(raw_eq, str):
+        s = raw_eq.strip()
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    cleaned = [str(x) for x in parsed if str(x) in EQUIPMENT_NAMES]
+                    return cleaned or ["bodyweight"]
+            except Exception:
+                pass
+        if s in EQUIPMENT_NAMES:
+            return [s]
+    return ["bodyweight"]
+
+
 def get_user_tz(profile: dict | None = None) -> ZoneInfo:
     tz_name = profile.get("timezone", DEFAULT_TIMEZONE) if profile else DEFAULT_TIMEZONE
     try:
@@ -136,7 +159,6 @@ def now_iso(profile: dict | None = None) -> str:
 
 
 def calculate_nutrition(profile: dict) -> dict:
-    """Расчет базового обмена (Миффлин-Сан Жеор) + коэффициента активности + КБЖУ под цель."""
     w = float(profile["weight"])
     h = int(profile["height"])
     age = int(profile["age"])
@@ -156,7 +178,7 @@ def calculate_nutrition(profile: dict) -> dict:
         kcal = round(tdee * 0.82)
         protein = round(w * 2.2)
         fat = round(w * 0.8)
-    else:  # strength
+    else:
         kcal = round(tdee * 1.05)
         protein = round(w * 2.0)
         fat = round(w * 1.0)
@@ -171,6 +193,7 @@ def save_profile(user_id: int, data: dict) -> None:
     w = float(data["weight"])
     init_bw = existing["initial_body_weight"] if (existing and existing.get("initial_body_weight", 0) > 0) else w
     tz = data.get("timezone", DEFAULT_TIMEZONE)
+    eq_list = normalize_equipment(data.get("equipment"))
 
     with get_conn() as conn:
         conn.execute(
@@ -198,7 +221,8 @@ def save_profile(user_id: int, data: dict) -> None:
             (
                 user_id, data["gender"], int(data["age"]), int(data["height"]), w, init_bw,
                 data["goal"], json.dumps(data["priority_muscles"], ensure_ascii=False),
-                data["level"], data["equipment"], json.dumps(sorted(data["training_days"])),
+                data["level"], json.dumps(eq_list, ensure_ascii=False),
+                json.dumps(sorted(data["training_days"])),
                 int(data["duration"]), json.dumps(data["injuries"], ensure_ascii=False),
                 tz, counter, now_iso({"timezone": tz}),
             ),
@@ -230,6 +254,7 @@ def get_profile(user_id: int) -> dict | None:
     d["priority_muscles"] = json.loads(d["priority_muscles"])
     d["training_days"] = json.loads(d["training_days"])
     d["injuries"] = json.loads(d["injuries"])
+    d["equipment"] = normalize_equipment(d["equipment"])
     return d
 
 
@@ -278,13 +303,15 @@ def determine_split(profile: dict) -> tuple[str, list[dict]]:
 
 
 def filter_exercises(profile: dict, muscle: str) -> list[dict]:
-    equip = profile["equipment"]
+    equip_set = set(normalize_equipment(profile["equipment"]))
     injuries = set(profile["injuries"])
 
     valid = [
         ex for ex in EXERCISES
-        if ex["muscle"] == muscle and equip in ex["equip"] and not injuries.intersection(ex["exclude_injuries"])
+        if ex["muscle"] == muscle and equip_set.intersection(ex["equip"]) and not injuries.intersection(ex["exclude_injuries"])
     ]
+    if not valid:
+        valid = [ex for ex in EXERCISES if ex["muscle"] == muscle and "bodyweight" in ex["equip"] and not injuries.intersection(ex["exclude_injuries"])]
     if not valid:
         valid = [ex for ex in EXERCISES if ex["muscle"] == muscle and not injuries.intersection(ex["exclude_injuries"])]
     if not valid:
@@ -435,7 +462,6 @@ def get_or_create_today_workout(user_id: int, mode: str = "regular") -> dict:
 
 
 def swap_exercise_in_plan(user_id: int, ex_index: int) -> tuple[bool, str, dict | None]:
-    """Заменяет упражнение в сегодняшнем плане на безопасный аналог той же мышечной группы."""
     profile = get_profile(user_id)
     plan = get_or_create_today_workout(user_id, mode="active")
     exercises = plan["exercises"]
@@ -560,6 +586,7 @@ def apply_double_progression(ex_item: dict, logged_weight: float, logged_reps: l
 def format_profile_summary(profile: dict) -> str:
     muscles_str = ", ".join(MUSCLE_NAMES[m] for m in profile["priority_muscles"])
     days_str = ", ".join(WEEKDAY_NAMES[d] for d in sorted(profile["training_days"]))
+    equip_str = ", ".join(EQUIPMENT_NAMES.get(e, e) for e in profile["equipment"])
     injuries_str = ", ".join(INJURY_NAMES[i] for i in profile["injuries"]) if profile["injuries"] else "Нет"
     tz_label = TIMEZONE_LABELS.get(profile.get("timezone", DEFAULT_TIMEZONE), profile.get("timezone", DEFAULT_TIMEZONE))
     split_name, _ = determine_split(profile)
@@ -570,7 +597,7 @@ def format_profile_summary(profile: dict) -> str:
         f"• Параметры: {profile['gender']}, {profile['age']} лет, {profile['height']} см, {profile['weight']:g} кг\n"
         f"• Главная цель: <b>{GOAL_NAMES[profile['goal']]}</b>\n"
         f"• Приоритетные мышцы: <b>{muscles_str}</b>\n"
-        f"• Уровень: {LEVEL_NAMES[profile['level']]} | Инвентарь: {EQUIPMENT_NAMES[profile['equipment']]}\n"
+        f"• Уровень: {LEVEL_NAMES[profile['level']]} | Инвентарь: {equip_str}\n"
         f"• График: {days_str} (~{profile['duration']} мин) | Пояс: {tz_label}\n"
         f"• Ограничения/травмы: {injuries_str}\n"
         f"• Подобранный сплит: <b>{split_name}</b>\n\n"
@@ -715,12 +742,28 @@ class BodyWeightFlow(StatesGroup):
     waiting_weight = State()
 
 
+def get_webapp_url(req: web.Request | None = None) -> str:
+    if WEBAPP_PUBLIC_URL:
+        return f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}"
+    if req is not None:
+        host = req.headers.get("X-Forwarded-Host") or req.host
+        return f"https://{host}/?uid={ADMIN_TELEGRAM_ID}"
+    for env_key in ("BOTHOST_DOMAIN", "DOMAIN", "APP_URL", "PUBLIC_URL", "RENDER_EXTERNAL_URL"):
+        val = os.getenv(env_key, "").strip().rstrip("/")
+        if val:
+            if not val.startswith("http"):
+                val = f"https://{val}"
+            return f"{val}/?uid={ADMIN_TELEGRAM_ID}"
+    return ""
+
+
 def main_menu_kb() -> InlineKeyboardMarkup:
     rows = []
     w_url = get_webapp_url()
     if w_url:
         rows.append([InlineKeyboardButton(text="📱 Открыть Mini App (с картинками)", web_app=WebAppInfo(url=w_url))])
-    rows.extend([
+    rows.extend(
+        [
             [InlineKeyboardButton(text="🏋️ План на сегодня", callback_data="menu:plan")],
             [InlineKeyboardButton(text="📝 Сдать отчет по тренировке", callback_data="menu:report")],
             [InlineKeyboardButton(text="⚡ Мало времени (экспресс на 20 мин)", callback_data="menu:express")],
@@ -780,6 +823,15 @@ def build_muscles_kb(selected: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def build_equip_kb(selected: list[str]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"{'✅ ' if k in selected else ''}{lbl}", callback_data=f"onb_eq:{k}")]
+        for k, lbl in EQUIPMENT_NAMES.items()
+    ]
+    rows.append([InlineKeyboardButton(text="Готово ➡️", callback_data="onb_eq:done")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_days_kb(selected: list[int]) -> InlineKeyboardMarkup:
     row1 = [InlineKeyboardButton(text=f"{'✅ ' if d in selected else ''}{WEEKDAY_NAMES[d]}", callback_data=f"onb_day:{d}") for d in range(4)]
     row2 = [InlineKeyboardButton(text=f"{'✅ ' if d in selected else ''}{WEEKDAY_NAMES[d]}", callback_data=f"onb_day:{d}") for d in range(4, 7)]
@@ -830,6 +882,30 @@ async def cmd_menu(message: Message, state: FSMContext) -> None:
         await start_onboarding(message, state)
         return
     await message.answer("Главное меню тренера. Выбирай задачу:", reply_markup=main_menu_kb())
+
+
+@router.message(Command("domain"))
+async def cmd_set_domain(message: Message) -> None:
+    global WEBAPP_PUBLIC_URL
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Отправь ссылку на домен Bothost так: <code>/domain https://bot1234.bothost.tech</code>")
+        return
+    url = parts[1].strip().rstrip("/")
+    if not url.startswith("http"):
+        url = f"https://{url}"
+    WEBAPP_PUBLIC_URL = url
+    try:
+        await message.bot.set_chat_menu_button(
+            chat_id=ADMIN_TELEGRAM_ID,
+            menu_button=MenuButtonWebApp(text="📱 Тренер App", web_app=WebAppInfo(url=f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}")),
+        )
+    except Exception:
+        pass
+    await message.answer(
+        "✅ <b>Mini App успешно привязан к кнопке меню!</b>\nОткрой приложение кнопкой ниже:",
+        reply_markup=main_menu_kb(),
+    )
 
 
 @router.callback_query(F.data == "menu:home")
@@ -936,19 +1012,36 @@ async def onb_muscles(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(Onboarding.level, F.data.startswith("onb_lvl:"))
 async def onb_level(call: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(level=call.data.split(":", 1)[1])
+    await state.update_data(level=call.data.split(":", 1)[1], equipment=[])
     await state.set_state(Onboarding.equipment)
     await call.answer()
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=l, callback_data=f"onb_eq:{k}")] for k, l in EQUIPMENT_NAMES.items()])
-    await call.message.answer("<b>Шаг 8/12.</b> Где и с каким инвентарем тренируешься?", reply_markup=kb)
+    await call.message.answer("<b>Шаг 8/12.</b> Выбери инвентарь / места тренировок (можно несколько):", reply_markup=build_equip_kb([]))
 
 
 @router.callback_query(Onboarding.equipment, F.data.startswith("onb_eq:"))
 async def onb_equipment(call: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(equipment=call.data.split(":", 1)[1], training_days=[])
-    await state.set_state(Onboarding.training_days)
+    val = call.data.split(":", 1)[1]
+    data = await state.get_data()
+    selected: list[str] = list(data.get("equipment", []))
+
+    if val == "done":
+        if not selected:
+            await call.answer("⚠️ Выбери хотя бы 1 вариант!", show_alert=True)
+            return
+        await state.update_data(training_days=[])
+        await state.set_state(Onboarding.training_days)
+        await call.answer()
+        await call.message.answer("<b>Шаг 9/12.</b> Отметь дни недели, в которые ты ОБЯЗАН тренироваться:", reply_markup=build_days_kb([]))
+        return
+
+    if val in selected:
+        selected.remove(val)
+    else:
+        selected.append(val)
+
+    await state.update_data(equipment=selected)
     await call.answer()
-    await call.message.answer("<b>Шаг 9/12.</b> Отметь дни недели, в которые ты ОБЯЗАН тренироваться:", reply_markup=build_days_kb([]))
+    await call.message.edit_reply_markup(reply_markup=build_equip_kb(selected))
 
 
 @router.callback_query(Onboarding.training_days, F.data.startswith("onb_day:"))
@@ -1327,52 +1420,9 @@ async def msg_idle_fallback(message: Message) -> None:
     await message.answer(f"💬 {random.choice(IDLE_CHAT_QUOTES)}", reply_markup=main_menu_kb())
 
 
-# ==================== ПЛАНИРОВЩИК ПРОТИВ ЛЕНИ (APScheduler) ====================
-
-async def hourly_discipline_check(bot: Bot) -> None:
-    profile = get_profile(ADMIN_TELEGRAM_ID)
-    if not profile:
-        return
-    now_local = datetime.now(get_user_tz(profile))
-    if now_local.weekday() not in profile["training_days"]:
-        return
-    try:
-        if now_local.hour == 9:
-            plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode="regular")
-            text = f"⏰ <b>09:00 | ПОДЪЕМ НА ТРЕНИРОВКУ</b>\n\n{random.choice(MORNING_QUOTES)}\n\n{format_workout_plan(plan)}"
-            await send_safe_html(bot, ADMIN_TELEGRAM_ID, text, reply_markup=plan_menu_kb())
-        elif now_local.hour == 20 and not has_logged_today(profile):
-            text = f"🚨 <b>20:00 | КОНТРОЛЬ ДИСЦИПЛИНЫ</b>\n\n{random.choice(EVENING_SHAME_QUOTES)}"
-            await bot.send_message(chat_id=ADMIN_TELEGRAM_ID, text=text, reply_markup=evening_kick_kb())
-    except Exception as exc:
-        logging.error(f"Ошибка планировщика: {exc}")
-
-
-
-from aiohttp import web
-from aiogram.types import WebAppInfo, MenuButtonWebApp
-
-WEBAPP_PORT = int(os.getenv("PORT", os.getenv("SERVER_PORT", "8080")))
-WEBAPP_PUBLIC_URL = os.getenv("WEBAPP_URL", "").rstrip("/")
-
-
-def get_webapp_url(req: web.Request | None = None) -> str:
-    if WEBAPP_PUBLIC_URL:
-        return f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}"
-    if req is not None:
-        host = req.headers.get("X-Forwarded-Host") or req.host
-        return f"https://{host}/?uid={ADMIN_TELEGRAM_ID}"
-    for env_key in ("BOTHOST_DOMAIN", "DOMAIN", "APP_URL", "PUBLIC_URL", "RENDER_EXTERNAL_URL"):
-        val = os.getenv(env_key, "").strip().rstrip("/")
-        if val:
-            if not val.startswith("http"):
-                val = f"https://{val}"
-            return f"{val}/?uid={ADMIN_TELEGRAM_ID}"
-    return ""
-
+# ==================== ВЕБ-СЕРВЕР MINI APP (aiohttp) ====================
 
 async def handle_index(request: web.Request) -> web.Response:
-    # Запоминаем домен автоматически при первом же открытии
     global WEBAPP_PUBLIC_URL
     if not WEBAPP_PUBLIC_URL and request.host and not request.host.startswith("127.") and not request.host.startswith("0.0.0.0"):
         WEBAPP_PUBLIC_URL = f"https://{request.host}"
@@ -1393,6 +1443,7 @@ async def handle_api_state(request: web.Request) -> web.Response:
             "muscle_names": MUSCLE_NAMES,
             "weekday_names": WEEKDAY_NAMES,
             "injury_names": INJURY_NAMES,
+            "equipment_names": EQUIPMENT_NAMES,
         })
 
     plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode=mode)
@@ -1433,6 +1484,7 @@ async def handle_api_state(request: web.Request) -> web.Response:
         "muscle_names": MUSCLE_NAMES,
         "weekday_names": WEEKDAY_NAMES,
         "injury_names": INJURY_NAMES,
+        "equipment_names": EQUIPMENT_NAMES,
     })
 
 
@@ -1476,7 +1528,6 @@ async def handle_api_finish_workout(request: web.Request) -> web.Response:
         for ex in plan["exercises"] if ex.get("logged_today")
     ]
     if not logged:
-        # Если нажал завершить сразу — засчитываем выполнение по плану
         for ex in plan["exercises"]:
             apply_double_progression(ex, float(ex["target_weight"]), [int(ex["target_reps"])] * int(ex["sets"]))
             logged.append({"id": ex["id"], "name": ex["name"], "weight": ex["target_weight"], "reps": [ex["target_reps"]] * ex["sets"]})
@@ -1518,28 +1569,25 @@ async def handle_api_save_profile(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
-@router.message(Command("domain"))
-async def cmd_set_domain(message: Message) -> None:
-    global WEBAPP_PUBLIC_URL
-    parts = (message.text or "").split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer("Отправь ссылку на домен Bothost так: <code>/domain https://bot1234.bothost.tech</code>")
+# ==================== ПЛАНИРОВЩИК ПРОТИВ ЛЕНИ (APScheduler) ====================
+
+async def hourly_discipline_check(bot: Bot) -> None:
+    profile = get_profile(ADMIN_TELEGRAM_ID)
+    if not profile:
         return
-    url = parts[1].strip().rstrip("/")
-    if not url.startswith("http"):
-        url = f"https://{url}"
-    WEBAPP_PUBLIC_URL = url
+    now_local = datetime.now(get_user_tz(profile))
+    if now_local.weekday() not in profile["training_days"]:
+        return
     try:
-        await message.bot.set_chat_menu_button(
-            chat_id=ADMIN_TELEGRAM_ID,
-            menu_button=MenuButtonWebApp(text="📱 Тренер App", web_app=WebAppInfo(url=f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}")),
-        )
-    except Exception:
-        pass
-    await message.answer(
-        f"✅ <b>Mini App успешно привязан к кнопке меню!</b>\nОткрой приложение кнопкой ниже:",
-        reply_markup=main_menu_kb(),
-    )
+        if now_local.hour == 9:
+            plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode="regular")
+            text = f"⏰ <b>09:00 | ПОДЪЕМ НА ТРЕНИРОВКУ</b>\n\n{random.choice(MORNING_QUOTES)}\n\n{format_workout_plan(plan)}"
+            await send_safe_html(bot, ADMIN_TELEGRAM_ID, text, reply_markup=plan_menu_kb())
+        elif now_local.hour == 20 and not has_logged_today(profile):
+            text = f"🚨 <b>20:00 | КОНТРОЛЬ ДИСЦИПЛИНЫ</b>\n\n{random.choice(EVENING_SHAME_QUOTES)}"
+            await bot.send_message(chat_id=ADMIN_TELEGRAM_ID, text=text, reply_markup=evening_kick_kb())
+    except Exception as exc:
+        logging.error(f"Ошибка планировщика: {exc}")
 
 
 async def main() -> None:
@@ -1550,7 +1598,6 @@ async def main() -> None:
     dp.callback_query.middleware(AdminOnlyMiddleware())
     dp.include_router(router)
 
-    # Запускаем встроенный веб-сервер для Telegram Mini App
     app = web.Application()
     app["bot"] = bot
     app.router.add_get("/", handle_index)
@@ -1585,7 +1632,6 @@ async def main() -> None:
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("Бот-тренер + Mini App запущены и следят за дисциплиной.")
     await dp.start_polling(bot)
-
 
 
 if __name__ == "__main__":
