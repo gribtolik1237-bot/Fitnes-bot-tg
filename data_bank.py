@@ -20,9 +20,9 @@ GOAL_NAMES = {
 }
 
 LEVEL_NAMES = {
-    "beginner": "Новичок (до 6 мес.)",
-    "intermediate": "Средний (6 мес. – 2 года)",
-    "advanced": "Продвинутый (2+ года)",
+    "beginner": "🟢 Лёгкий (базовый объём)",
+    "intermediate": "🟡 Средний (рабочий объём)",
+    "advanced": "🔴 Хардкор (максимальный объём)",
 }
 
 EQUIPMENT_NAMES = {

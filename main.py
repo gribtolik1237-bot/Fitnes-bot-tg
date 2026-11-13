@@ -279,9 +279,8 @@ def save_workout_log(workout_type: str, logged_items: list[dict], profile: dict 
 
 def determine_split(profile: dict) -> tuple[str, list[dict]]:
     days_count = len(profile["training_days"])
-    level = profile["level"]
 
-    if days_count <= 2 or (days_count == 3 and level == "beginner"):
+    if days_count <= 3:
         return f"Full Body (Все тело, {days_count} дн./нед.)", [
             {"day_title": "Full Body — День А (Акцент на базовый жим и присед)", "muscles": ["quads", "chest", "back", "shoulders", "biceps", "triceps", "abs"]},
             {"day_title": "Full Body — День Б (Акцент на тяги и заднюю цепь)", "muscles": ["hamstrings", "glutes", "back", "chest", "shoulders", "calves", "abs"]},
@@ -319,7 +318,7 @@ def filter_exercises(profile: dict, muscle: str) -> list[dict]:
     return valid
 
 
-def get_exercise_targets(ex: dict, goal: str) -> tuple[float, int, int, int]:
+def get_exercise_targets(ex: dict, goal: str, level: str = "intermediate") -> tuple[float, int, int, int]:
     rep_min, rep_max = ex["rep_min"], ex["rep_max"]
     is_timed = ex.get("is_timed", False)
 
@@ -330,6 +329,12 @@ def get_exercise_targets(ex: dict, goal: str) -> tuple[float, int, int, int]:
         elif goal == "cut":
             rep_min = rep_min + 2
             rep_max = rep_max + 3
+
+        if level == "advanced":
+            rep_min += 1
+            rep_max += 2
+        elif level == "beginner":
+            rep_min = max(4, rep_min - 1)
 
     with get_conn() as conn:
         row = conn.execute("SELECT current_weight, target_reps FROM exercise_progress WHERE exercise_id = ?", (ex["id"],)).fetchone()
@@ -358,8 +363,20 @@ def build_regular_workout(profile: dict) -> dict:
     max_seconds = profile["duration"] * 60
 
     ordered_muscles = sorted(day_template["muscles"], key=lambda m: (0 if m in priority else 1))
-    base_sets = 3 if level == "beginner" else 4
-    rest_mult = 1.25 if goal == "strength" else (0.8 if goal == "cut" else 1.0)
+
+    # Уровень сложности напрямую регулирует объем подходов и плотность отдыха
+    if level == "beginner":
+        base_sets = 3
+        diff_rest_mult = 1.15
+    elif level == "advanced":
+        base_sets = 5
+        diff_rest_mult = 0.85
+    else:
+        base_sets = 4
+        diff_rest_mult = 1.0
+
+    goal_rest_mult = 1.25 if goal == "strength" else (0.8 if goal == "cut" else 1.0)
+    rest_mult = goal_rest_mult * diff_rest_mult
 
     selected_exercises = []
     total_time = 180
@@ -377,13 +394,13 @@ def build_regular_workout(profile: dict) -> dict:
             if is_priority and num_ex_for_muscle == 1:
                 sets += 1
 
-            rest_sec = int(round((ex["rest_sec"] * rest_mult) / 5.0) * 5)
+            rest_sec = max(30, int(round((ex["rest_sec"] * rest_mult) / 5.0) * 5))
             est_ex_time = sets * (40 + rest_sec) + 60
 
             if total_time + est_ex_time > max_seconds and len(selected_exercises) >= 3:
                 continue
 
-            weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal)
+            weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal, level)
             selected_exercises.append({
                 "id": ex["id"], "name": ex["name"], "muscle": muscle,
                 "is_priority": is_priority, "is_compound": ex["is_compound"],
@@ -405,6 +422,7 @@ def build_regular_workout(profile: dict) -> dict:
 def build_express_workout(profile: dict) -> dict:
     priority = list(profile["priority_muscles"])
     goal = profile["goal"]
+    level = profile["level"]
     target_muscles_pool = priority + ["chest", "back", "quads", "abs"]
     chosen_muscles = []
     for m in target_muscles_pool:
@@ -412,6 +430,9 @@ def build_express_workout(profile: dict) -> dict:
             chosen_muscles.append(m)
         if len(chosen_muscles) == 4:
             break
+
+    sets_count = 2 if level == "beginner" else (4 if level == "advanced" else 3)
+    rest_val = 60 if level == "beginner" else (30 if level == "advanced" else 45)
 
     exercises = []
     used_ids = set()
@@ -421,14 +442,14 @@ def build_express_workout(profile: dict) -> dict:
         ex = next((c for c in candidates if c["id"] not in used_ids), candidates[0])
         used_ids.add(ex["id"])
 
-        weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal)
+        weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal, level)
         superset_label = "Суперсет 1" if i < 2 else "Суперсет 2"
         exercises.append({
             "id": ex["id"], "name": f"[{superset_label}] {ex['name']}", "muscle": muscle,
             "is_priority": muscle in priority, "is_compound": ex["is_compound"],
-            "is_timed": ex.get("is_timed", False), "sets": 3,
+            "is_timed": ex.get("is_timed", False), "sets": sets_count,
             "target_weight": weight, "target_reps": t_reps,
-            "rep_min": r_min, "rep_max": r_max, "rest_sec": 45, "cues": ex["cues"],
+            "rep_min": r_min, "rep_max": r_max, "rest_sec": rest_val, "cues": ex["cues"],
         })
 
     return {
@@ -477,7 +498,7 @@ def swap_exercise_in_plan(user_id: int, ex_index: int) -> tuple[bool, str, dict 
         return False, f"Для группы «{MUSCLE_NAMES[muscle]}» под твой инвентарь и травмы других аналогов нет.", None
 
     new_ex = random.choice(candidates)
-    weight, t_reps, r_min, r_max = get_exercise_targets(new_ex, profile["goal"])
+    weight, t_reps, r_min, r_max = get_exercise_targets(new_ex, profile["goal"], profile["level"])
 
     prefix_match = re.match(r"^(\[Суперсет \d+\]\s*)", old_ex["name"])
     prefix = prefix_match.group(1) if prefix_match else ""
@@ -530,7 +551,8 @@ def apply_double_progression(ex_item: dict, logged_weight: float, logged_reps: l
                 next_weight = round((logged_weight + step) * 2) / 2
                 next_reps = rep_min
                 msg = (
-                    f"🔥 <b>ДВОЙНАЯ ПРОГРЕССИЯ!</b> Все подходы закрыты на максимум ({rep_max} {unit}).\n"
+                    f"🔥 <b>ДВОЙНАЯ ПРОГРЕССИЯ!</b> Все подходы закрыты на максимум ({rep_max} {unit}).
+"
                     f"Вес повышен: <b>{logged_weight:g} кг → {next_weight:g} кг</b> (новая цель: {next_reps} {unit})."
                 )
             else:
@@ -544,7 +566,8 @@ def apply_double_progression(ex_item: dict, logged_weight: float, logged_reps: l
                 next_reps = rep_min
                 fail_streak = 0
                 msg = (
-                    f"⚠️ <b>АВТО-РАЗГРУЗКА (DELOAD):</b> 2 тренировки подряд ниже минимума ({rep_min} {unit}).\n"
+                    f"⚠️ <b>АВТО-РАЗГРУЗКА (DELOAD):</b> 2 тренировки подряд ниже минимума ({rep_min} {unit}).
+"
                     f"Чтобы пробить плато, рабочий вес снижен на 10%: <b>{logged_weight:g} кг → {next_weight:g} кг</b>."
                 )
             else:
@@ -593,15 +616,25 @@ def format_profile_summary(profile: dict) -> str:
     nut = calculate_nutrition(profile)
 
     return (
-        f"📋 <b>ТВОЙ ПРОФИЛЬ АТЛЕТА</b>\n"
-        f"• Параметры: {profile['gender']}, {profile['age']} лет, {profile['height']} см, {profile['weight']:g} кг\n"
-        f"• Главная цель: <b>{GOAL_NAMES[profile['goal']]}</b>\n"
-        f"• Приоритетные мышцы: <b>{muscles_str}</b>\n"
-        f"• Уровень: {LEVEL_NAMES[profile['level']]} | Инвентарь: {equip_str}\n"
-        f"• График: {days_str} (~{profile['duration']} мин) | Пояс: {tz_label}\n"
-        f"• Ограничения/травмы: {injuries_str}\n"
-        f"• Подобранный сплит: <b>{split_name}</b>\n\n"
-        f"🥩 <b>СУТОЧНАЯ НОРМА КБЖУ ПОД ЦЕЛЬ:</b>\n"
+        f"📋 <b>ТВОЙ ПРОФИЛЬ АТЛЕТА</b>
+"
+        f"• Параметры: {profile['gender']}, {profile['age']} лет, {profile['height']} см, {profile['weight']:g} кг
+"
+        f"• Главная цель: <b>{GOAL_NAMES[profile['goal']]}</b>
+"
+        f"• Приоритетные мышцы: <b>{muscles_str}</b>
+"
+        f"• Сложность: {LEVEL_NAMES.get(profile['level'], profile['level'])} | Инвентарь: {equip_str}
+"
+        f"• График: {days_str} (~{profile['duration']} мин) | Пояс: {tz_label}
+"
+        f"• Ограничения/травмы: {injuries_str}
+"
+        f"• Подобранный сплит: <b>{split_name}</b>
+
+"
+        f"🥩 <b>СУТОЧНАЯ НОРМА КБЖУ ПОД ЦЕЛЬ:</b>
+"
         f"<b>{nut['kcal']} ккал</b> | Белки: <b>{nut['protein']}г</b> | Жиры: <b>{nut['fat']}г</b> | Углеводы: <b>{nut['carbs']}г</b>"
     )
 
@@ -610,12 +643,14 @@ def format_workout_plan(plan: dict) -> str:
     lines = [
         f"🏋️ <b>{plan['day_title']}</b>",
         f"📌 Сплит: <i>{plan['split_name']}</i>",
-        f"⏱ Расчетное время: ~{plan['est_minutes']} мин\n",
+        f"⏱ Расчетное время: ~{plan['est_minutes']} мин
+",
     ]
     if plan["workout_type"] == "express":
         lines.append(
             "⚡ <b>РЕЖИМ СУПЕРСЕТОВ:</b> Выполняй упражнения внутри одного суперсета подряд без отдыха, "
-            "после пары упражнений отдых 45 сек. 3 круга на каждый суперсет.\n"
+            "после пары упражнений отдых 45 сек. 3 круга на каждый суперсет.
+"
         )
 
     for idx, ex in enumerate(plan["exercises"], start=1):
@@ -623,12 +658,15 @@ def format_workout_plan(plan: dict) -> str:
         weight_txt = f"{ex['target_weight']:g} кг" if ex["target_weight"] > 0 else "Свой вес / подбор"
         unit = "сек" if ex.get("is_timed") else "повт."
         lines.append(
-            f"<b>{idx}. {star}{ex['name']}</b>\n"
+            f"<b>{idx}. {star}{ex['name']}</b>
+"
             f"   └ Подходы: <b>{ex['sets']} × {ex['target_reps']} {unit}</b> (диапазон {ex['rep_min']}–{ex['rep_max']}) | "
-            f"Вес: <b>{weight_txt}</b> | Отдых: {ex['rest_sec']} сек\n"
+            f"Вес: <b>{weight_txt}</b> | Отдых: {ex['rest_sec']} сек
+"
             f"   └ <i>Техника: {ex['cues']}</i>"
         )
-    return "\n".join(lines)
+    return "
+".join(lines)
 
 
 def format_progress_report(profile: dict) -> str:
@@ -644,14 +682,20 @@ def format_progress_report(profile: dict) -> str:
     nut = calculate_nutrition(profile)
 
     header = (
-        f"📈 <b>МОЙ ПРОГРЕСС И ФОРМА</b>\n\n"
-        f"🏆 Закрыто тренировок: <b>{total_workouts}</b>\n"
-        f"⚖️ Собственный вес: <b>{init_bw:g} кг → {curr_bw:g} кг</b> ({bw_sign}{bw_diff:g} кг)\n"
-        f"🥩 Актуальная норма: <b>{nut['kcal']} ккал</b> (Б: {nut['protein']}г / Ж: {nut['fat']}г / У: {nut['carbs']}г)\n"
+        f"📈 <b>МОЙ ПРОГРЕСС И ФОРМА</b>
+
+"
+        f"🏆 Закрыто тренировок: <b>{total_workouts}</b>
+"
+        f"⚖️ Собственный вес: <b>{init_bw:g} кг → {curr_bw:g} кг</b> ({bw_sign}{bw_diff:g} кг)
+"
+        f"🥩 Актуальная норма: <b>{nut['kcal']} ккал</b> (Б: {nut['protein']}г / Ж: {nut['fat']}г / У: {nut['carbs']}г)
+"
     )
 
     if not rows:
-        return header + "\nПока в журнале <b>0 выполненных тренировок</b>. Сдай первый отчет, чтобы запустить трекер весов и рекордов!"
+        return header + "
+Пока в журнале <b>0 выполненных тренировок</b>. Сдай первый отчет, чтобы запустить трекер весов и рекордов!"
 
     priority = set(profile["priority_muscles"])
     lines = [header]
@@ -677,9 +721,11 @@ def format_progress_report(profile: dict) -> str:
 
     if recent_logs:
         logs_str = ", ".join(f"{l['date']} ({'экспресс' if l['workout_type']=='express' else 'база'})" for l in recent_logs)
-        lines.append(f"\n🗓 <b>Последние тренировки:</b> {logs_str}")
+        lines.append(f"
+🗓 <b>Последние тренировки:</b> {logs_str}")
 
-    return "\n".join(lines)
+    return "
+".join(lines)
 
 
 async def send_safe_html(bot: Bot, chat_id: int, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
@@ -688,9 +734,13 @@ async def send_safe_html(bot: Bot, chat_id: int, text: str, reply_markup: Inline
         return
 
     chunks, current = [], ""
-    for block in text.split("\n\n"):
+    for block in text.split("
+
+"):
         if len(current) + len(block) + 2 <= 4000:
-            current = f"{current}\n\n{block}" if current else block
+            current = f"{current}
+
+{block}" if current else block
         else:
             if current:
                 chunks.append(current)
@@ -857,8 +907,11 @@ async def start_onboarding(target_msg: Message, state: FSMContext) -> None:
         ]]
     )
     await target_msg.answer(
-        "🔥 <b>Запускаем настройку твоего персонального тренера.</b>\n"
-        "Отвечай честно и без воды — от этого зависит программа, КБЖУ и прогрессия нагрузок.\n\n"
+        "🔥 <b>Запускаем настройку твоего персонального тренера.</b>
+"
+        "Отвечай честно и без воды — от этого зависит программа, КБЖУ и прогрессия нагрузок.
+
+"
         "<b>Шаг 1/12.</b> Укажи свой пол:",
         reply_markup=kb,
     )
@@ -869,7 +922,9 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     profile = get_profile(message.from_user.id)
     if profile:
         await state.clear()
-        await message.answer("С возвращением в строй. Твой профиль активен.\n\n" + format_profile_summary(profile), reply_markup=main_menu_kb())
+        await message.answer("С возвращением в строй. Твой профиль активен.
+
+" + format_profile_summary(profile), reply_markup=main_menu_kb())
     else:
         await start_onboarding(message, state)
 
@@ -903,7 +958,8 @@ async def cmd_set_domain(message: Message) -> None:
     except Exception:
         pass
     await message.answer(
-        "✅ <b>Mini App успешно привязан к кнопке меню!</b>\nОткрой приложение кнопкой ниже:",
+        "✅ <b>Mini App успешно привязан к кнопке меню!</b>
+Открой приложение кнопкой ниже:",
         reply_markup=main_menu_kb(),
     )
 
@@ -994,7 +1050,7 @@ async def onb_muscles(call: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(Onboarding.level)
         await call.answer()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=l, callback_data=f"onb_lvl:{k}")] for k, l in LEVEL_NAMES.items()])
-        await call.message.answer("<b>Шаг 7/12.</b> Укажи свой уровень подготовки:", reply_markup=kb)
+        await call.message.answer("<b>Шаг 7/12.</b> Выбери уровень сложности тренировок:", reply_markup=kb)
         return
 
     if val in selected:
@@ -1112,9 +1168,13 @@ async def onb_timezone(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await call.answer("Анкета сохранена!")
     await call.message.answer(
-        "✅ <b>Анкета принята. Сплит, КБЖУ и рабочие объемы рассчитаны.</b>\n\n"
+        "✅ <b>Анкета принята. Сплит, КБЖУ и рабочие объемы рассчитаны.</b>
+
+"
         + format_profile_summary(profile)
-        + "\n\nНикаких оправданий — жми <b>«План на сегодня»</b> и начинай.",
+        + "
+
+Никаких оправданий — жми <b>«План на сегодня»</b> и начинай.",
         reply_markup=main_menu_kb(),
     )
 
@@ -1124,7 +1184,8 @@ async def onb_timezone(call: CallbackQuery, state: FSMContext) -> None:
 async def _timer_worker(bot: Bot, chat_id: int, seconds: int) -> None:
     try:
         await asyncio.sleep(seconds)
-        await bot.send_message(chat_id=chat_id, text=f"⏰ <b>ВРЕМЯ ОТДЫХА ВЫШЛО ({seconds} сек)!</b>\nХватит сидеть в телефоне — под снаряд и за работу!")
+        await bot.send_message(chat_id=chat_id, text=f"⏰ <b>ВРЕМЯ ОТДЫХА ВЫШЛО ({seconds} сек)!</b>
+Хватит сидеть в телефоне — под снаряд и за работу!")
     except asyncio.CancelledError:
         pass
     finally:
@@ -1167,7 +1228,9 @@ async def cb_swap_do(call: CallbackQuery) -> None:
         await call.answer(msg, show_alert=True)
         return
     await call.answer("Заменено!")
-    await send_safe_html(call.bot, call.from_user.id, f"{msg}\n\n{format_workout_plan(plan)}", reply_markup=plan_menu_kb())
+    await send_safe_html(call.bot, call.from_user.id, f"{msg}
+
+{format_workout_plan(plan)}", reply_markup=plan_menu_kb())
 
 
 # ==================== ГЛАВНОЕ МЕНЮ ====================
@@ -1203,7 +1266,9 @@ async def cb_express(call: CallbackQuery, state: FSMContext) -> None:
         return
     plan = get_or_create_today_workout(call.from_user.id, mode="express")
     await call.answer("Собран экспресс-протокол!")
-    text = "⚡ <b>Времени мало — значит, плотность работы будет максимальной!</b>\n\n" + format_workout_plan(plan)
+    text = "⚡ <b>Времени мало — значит, плотность работы будет максимальной!</b>
+
+" + format_workout_plan(plan)
     await send_safe_html(call.bot, call.from_user.id, text, reply_markup=plan_menu_kb())
 
 
@@ -1219,7 +1284,9 @@ async def cb_excuse(call: CallbackQuery, state: FSMContext) -> None:
             [InlineKeyboardButton(text="🏋️ Иду делать базу по плану", callback_data="menu:plan")],
         ]
     )
-    await call.message.answer(f"🛑 <b>СТОП. Оправдания не принимаются.</b>\n\n{goal_line}{random.choice(EXCUSE_RESPONSES)}", reply_markup=kb)
+    await call.message.answer(f"🛑 <b>СТОП. Оправдания не принимаются.</b>
+
+{goal_line}{random.choice(EXCUSE_RESPONSES)}", reply_markup=kb)
 
 
 @router.callback_query(F.data == "menu:progress")
@@ -1245,7 +1312,8 @@ async def cb_bodyweight_start(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer()
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="menu:home")]])
     await call.message.answer(
-        f"⚖️ Текущий вес: <b>{profile['weight']:g} кг</b>.\nВведи новый вес в кг (например: <code>79.2</code>):",
+        f"⚖️ Текущий вес: <b>{profile['weight']:g} кг</b>.
+Введи новый вес в кг (например: <code>79.2</code>):",
         reply_markup=kb,
     )
 
@@ -1266,7 +1334,8 @@ async def msg_bodyweight_input(message: Message, state: FSMContext) -> None:
     sign = "+" if diff > 0 else ""
     await state.clear()
     await message.answer(
-        f"✅ Вес обновлен: <b>{curr_bw:g} кг</b> (от старта: <b>{sign}{diff:g} кг</b>).\n"
+        f"✅ Вес обновлен: <b>{curr_bw:g} кг</b> (от старта: <b>{sign}{diff:g} кг</b>).
+"
         f"🥩 Пересчитанная норма: <b>{nut['kcal']} ккал</b> (Б: {nut['protein']}г / Ж: {nut['fat']}г / У: {nut['carbs']}г).",
         reply_markup=main_menu_kb(),
     )
@@ -1298,9 +1367,13 @@ async def prompt_next_exercise(target_msg: Message, exercises: list[dict], idx: 
     )
 
     await target_msg.answer(
-        f"📝 <b>Упражнение {idx + 1} из {total}:</b>\n"
-        f"<b>{ex['name']}</b>\n"
-        f"🎯 План: <b>{sets} подх. × {reps} {unit}</b> (диапазон {ex['rep_min']}–{ex['rep_max']}) | Вес: <b>{w_label}</b>\n\n"
+        f"📝 <b>Упражнение {idx + 1} из {total}:</b>
+"
+        f"<b>{ex['name']}</b>
+"
+        f"🎯 План: <b>{sets} подх. × {reps} {unit}</b> (диапазон {ex['rep_min']}–{ex['rep_max']}) | Вес: <b>{w_label}</b>
+
+"
         f"Жми кнопку ниже, если закрыл план 1-в-1, или введи факт: <code>вес повт1 повт2 ...</code> (пример: <code>{w:g} {exact_reps_preview}</code>).",
         reply_markup=kb,
     )
@@ -1359,7 +1432,10 @@ async def advance_report_step(target_msg: Message, state: FSMContext, logged_wei
             save_workout_log(workout_type, logged_results, profile)
             if workout_type == "regular":
                 increment_workout_counter(ADMIN_TELEGRAM_ID)
-            summary = f"🏁 <b>ОТЧЕТ ПО ТРЕНИРОВКЕ ЗАКРЫТ!</b>\nВыполнено упражнений: <b>{len(logged_results)}/{len(exercises)}</b>.\n\n{random.choice(REPORT_PRAISE_QUOTES)}"
+            summary = f"🏁 <b>ОТЧЕТ ПО ТРЕНИРОВКЕ ЗАКРЫТ!</b>
+Выполнено упражнений: <b>{len(logged_results)}/{len(exercises)}</b>.
+
+{random.choice(REPORT_PRAISE_QUOTES)}"
         else:
             summary = "⚠️ Ты пропустил все упражнения. Тренировка не засчитана в журнал."
         await state.clear()
@@ -1444,6 +1520,7 @@ async def handle_api_state(request: web.Request) -> web.Response:
             "weekday_names": WEEKDAY_NAMES,
             "injury_names": INJURY_NAMES,
             "equipment_names": EQUIPMENT_NAMES,
+            "level_names": LEVEL_NAMES,
         })
 
     plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode=mode)
@@ -1485,6 +1562,7 @@ async def handle_api_state(request: web.Request) -> web.Response:
         "weekday_names": WEEKDAY_NAMES,
         "injury_names": INJURY_NAMES,
         "equipment_names": EQUIPMENT_NAMES,
+        "level_names": LEVEL_NAMES,
     })
 
 
@@ -1542,7 +1620,10 @@ async def handle_api_finish_workout(request: web.Request) -> web.Response:
         try:
             await bot_inst.send_message(
                 chat_id=ADMIN_TELEGRAM_ID,
-                text=f"🏁 <b>ТРЕНИРОВКА В MINI APP ЗАКРЫТА!</b>\nВыполнено упражнений: <b>{len(logged)}/{len(plan['exercises'])}</b>.\n\n{praise}",
+                text=f"🏁 <b>ТРЕНИРОВКА В MINI APP ЗАКРЫТА!</b>
+Выполнено упражнений: <b>{len(logged)}/{len(plan['exercises'])}</b>.
+
+{praise}",
                 reply_markup=main_menu_kb(),
             )
         except Exception:
@@ -1581,10 +1662,16 @@ async def hourly_discipline_check(bot: Bot) -> None:
     try:
         if now_local.hour == 9:
             plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode="regular")
-            text = f"⏰ <b>09:00 | ПОДЪЕМ НА ТРЕНИРОВКУ</b>\n\n{random.choice(MORNING_QUOTES)}\n\n{format_workout_plan(plan)}"
+            text = f"⏰ <b>09:00 | ПОДЪЕМ НА ТРЕНИРОВКУ</b>
+
+{random.choice(MORNING_QUOTES)}
+
+{format_workout_plan(plan)}"
             await send_safe_html(bot, ADMIN_TELEGRAM_ID, text, reply_markup=plan_menu_kb())
         elif now_local.hour == 20 and not has_logged_today(profile):
-            text = f"🚨 <b>20:00 | КОНТРОЛЬ ДИСЦИПЛИНЫ</b>\n\n{random.choice(EVENING_SHAME_QUOTES)}"
+            text = f"🚨 <b>20:00 | КОНТРОЛЬ ДИСЦИПЛИНЫ</b>
+
+{random.choice(EVENING_SHAME_QUOTES)}"
             await bot.send_message(chat_id=ADMIN_TELEGRAM_ID, text=text, reply_markup=evening_kick_kb())
     except Exception as exc:
         logging.error(f"Ошибка планировщика: {exc}")
