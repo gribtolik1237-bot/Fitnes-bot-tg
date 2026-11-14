@@ -3,3 +3,4 @@ APScheduler==3.10.4
 aiohttp==3.10.5
 tzdata
 Pillow
+

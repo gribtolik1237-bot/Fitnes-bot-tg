@@ -859,24 +859,54 @@ def build_express_workout(profile: dict) -> dict:
     }
 
 
-def get_or_create_today_workout(user_id: int, mode: str = "regular") -> dict:
-    profile = get_profile(user_id)
-    today = today_str(profile)
-
+def _load_day_container(user_id: int, today: str) -> dict:
     with get_conn() as conn:
         row = conn.execute("SELECT date, plan_json FROM active_workouts WHERE user_id = ?", (user_id,)).fetchone()
-
     if row and row["date"] == today:
-        saved_plan = json.loads(row["plan_json"])
-        if mode == "active" or saved_plan.get("workout_type") == mode:
-            return saved_plan
+        try:
+            raw = json.loads(row["plan_json"])
+            if isinstance(raw, dict) and "plans" in raw:
+                return raw
+            if isinstance(raw, dict) and "workout_type" in raw:
+                wt = raw.get("workout_type", "regular")
+                return {"active_mode": wt, "plans": {wt: raw}}
+        except Exception:
+            pass
+    return {"active_mode": "regular", "plans": {}}
 
-    plan = build_express_workout(profile) if mode == "express" else build_regular_workout(profile)
+
+def save_active_plan(user_id: int, plan: dict, profile: dict | None = None) -> None:
+    if profile is None:
+        profile = get_profile(user_id)
+    today = today_str(profile)
+    wt = plan.get("workout_type", "regular")
+    container = _load_day_container(user_id, today)
+    container["active_mode"] = wt
+    container["plans"][wt] = plan
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO active_workouts (user_id, date, plan_json) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET date=excluded.date, plan_json=excluded.plan_json",
-            (user_id, today, json.dumps(plan, ensure_ascii=False)),
+            (user_id, today, json.dumps(container, ensure_ascii=False)),
         )
+
+
+def get_or_create_today_workout(user_id: int, mode: str = "regular") -> dict:
+    profile = get_profile(user_id)
+    today = today_str(profile)
+    container = _load_day_container(user_id, today)
+
+    target_mode = container.get("active_mode", "regular") if mode == "active" else mode
+    if target_mode not in ("regular", "express"):
+        target_mode = "regular"
+
+    if target_mode in container["plans"]:
+        plan = container["plans"][target_mode]
+        if container.get("active_mode") != target_mode:
+            save_active_plan(user_id, plan, profile)
+        return plan
+
+    plan = build_express_workout(profile) if target_mode == "express" else build_regular_workout(profile)
+    save_active_plan(user_id, plan, profile)
     return plan
 
 
@@ -922,11 +952,7 @@ def swap_exercise_in_plan(user_id: int, ex_index: int) -> tuple[bool, str, dict 
         "role": rx["role"],
     }
 
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE active_workouts SET plan_json = ? WHERE user_id = ?",
-            (json.dumps(plan, ensure_ascii=False), user_id),
-        )
+    save_active_plan(user_id, plan, profile)
     return True, f"🔄 Заменено на: <b>{new_ex['name']}</b>", plan
 
 
@@ -940,9 +966,16 @@ def apply_double_progression(ex_item: dict, logged_weight: float, logged_reps: l
 
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM exercise_progress WHERE exercise_id = ?", (ex_id,)).fetchone()
-        initial_weight = row["initial_weight"] if row and row["initial_weight"] is not None else logged_weight
-        best_weight = max(float(row["best_weight"]) if row else 0.0, logged_weight)
-        fail_streak = int(row["fail_streak"]) if row else 0
+        if "prev_progress_snapshot" not in ex_item:
+            ex_item["prev_progress_snapshot"] = {
+                "initial_weight": float(row["initial_weight"]) if (row and row["initial_weight"] is not None) else None,
+                "best_weight": float(row["best_weight"]) if row else 0.0,
+                "fail_streak": int(row["fail_streak"]) if row else 0,
+            }
+        snap = ex_item["prev_progress_snapshot"]
+        initial_weight = snap["initial_weight"] if snap["initial_weight"] is not None else logged_weight
+        best_weight = max(float(snap["best_weight"]), logged_weight)
+        fail_streak = int(snap["fail_streak"])
 
         hit_ceiling = len(logged_reps) >= target_sets and all(r >= rep_max for r in logged_reps[:target_sets])
         missed_floor = any(r < rep_min for r in logged_reps[:target_sets]) if logged_reps else False
@@ -1988,6 +2021,13 @@ async def advance_report_step(target_msg: Message, state: FSMContext, logged_wei
 
     if logged_weight is not None and logged_reps is not None:
         prog_feedback = apply_double_progression(current_ex, logged_weight, logged_reps)
+        current_ex["logged_today"] = True
+        current_ex["logged_weight"] = logged_weight
+        current_ex["logged_reps"] = logged_reps
+        plan_sync = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode="active")
+        if 0 <= idx < len(plan_sync.get("exercises", [])):
+            plan_sync["exercises"][idx] = current_ex
+            save_active_plan(ADMIN_TELEGRAM_ID, plan_sync)
         logged_results.append({"id": current_ex["id"], "name": current_ex["name"], "weight": logged_weight, "reps": logged_reps})
         await target_msg.answer(prog_feedback)
     else:
@@ -2135,6 +2175,7 @@ async def handle_api_state(request: web.Request) -> web.Response:
 
     return web.json_response({
         "has_profile": True,
+        "today_date": today_str(profile),
         "profile": profile,
         "profile_summary": {"split_name": split_name},
         "nutrition": nut,
@@ -2167,11 +2208,7 @@ async def handle_api_log_exercise(request: web.Request) -> web.Response:
     ex_item["logged_weight"] = weight
     ex_item["logged_reps"] = reps
 
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE active_workouts SET plan_json = ? WHERE user_id = ?",
-            (json.dumps(plan, ensure_ascii=False), ADMIN_TELEGRAM_ID),
-        )
+    save_active_plan(ADMIN_TELEGRAM_ID, plan)
     return web.json_response({"ok": True, "message": msg})
 
 
@@ -2200,11 +2237,7 @@ async def handle_api_finish_workout(request: web.Request) -> web.Response:
             ex["logged_weight"] = w_val
             ex["logged_reps"] = r_list
             logged.append({"id": ex["id"], "name": ex["name"], "weight": w_val, "reps": r_list})
-        with get_conn() as conn:
-            conn.execute(
-                "UPDATE active_workouts SET plan_json = ? WHERE user_id = ?",
-                (json.dumps(plan, ensure_ascii=False), ADMIN_TELEGRAM_ID),
-            )
+        save_active_plan(ADMIN_TELEGRAM_ID, plan, profile)
 
     save_workout_log(plan["workout_type"], logged, profile)
     if plan["workout_type"] == "regular" and not already_done:
