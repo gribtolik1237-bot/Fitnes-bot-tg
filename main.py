@@ -41,12 +41,12 @@ from data_bank import (
 # ==================== НАСТРОЙКИ ВЛАДЕЛЬЦА ====================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "9294187240:AAEjife-h5vu5j2yo92k8q5J8Lk7yI-0tHk")
-ADMIN_TELEGRAM_ID = 5028559439
+ADMIN_TELEGRAM_ID = int(os.getenv("ADMIN_TELEGRAM_ID", "5028559439"))
 DEFAULT_TIMEZONE = "Europe/Moscow"
-DB_PATH = "coach_bot.db"
+DB_PATH = os.getenv("DB_PATH", "coach_bot.db")
 
 WEBAPP_PORT = int(os.getenv("PORT", os.getenv("SERVER_PORT", "8080")))
-WEBAPP_PUBLIC_URL = os.getenv("WEBAPP_URL", "").rstrip("/")
+WEBAPP_PUBLIC_URL = os.getenv("WEBAPP_URL", "https://bot-1794505258-4183-bober.bothost.tech").rstrip("/")
 
 EXERCISE_MAP = {ex["id"]: ex for ex in EXERCISES}
 ACTIVE_TIMERS: dict[int, asyncio.Task] = {}
@@ -270,11 +270,22 @@ def has_logged_today(profile: dict | None = None) -> bool:
 
 
 def save_workout_log(workout_type: str, logged_items: list[dict], profile: dict | None = None) -> None:
+    t_str = today_str(profile)
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO workout_logs (date, workout_type, details, created_at) VALUES (?, ?, ?, ?)",
-            (today_str(profile), workout_type, json.dumps(logged_items, ensure_ascii=False), now_iso(profile)),
-        )
+        existing = conn.execute(
+            "SELECT id FROM workout_logs WHERE date = ? AND workout_type = ? LIMIT 1",
+            (t_str, workout_type),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE workout_logs SET details = ?, created_at = ? WHERE id = ?",
+                (json.dumps(logged_items, ensure_ascii=False), now_iso(profile), existing["id"]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO workout_logs (date, workout_type, details, created_at) VALUES (?, ?, ?, ?)",
+                (t_str, workout_type, json.dumps(logged_items, ensure_ascii=False), now_iso(profile)),
+            )
 
 
 def determine_split(profile: dict) -> tuple[str, list[dict]]:
@@ -368,10 +379,10 @@ def build_regular_workout(profile: dict) -> dict:
         base_sets = 3
         diff_rest_mult = 1.15
     elif level == "advanced":
-        base_sets = 5
+        base_sets = 4
         diff_rest_mult = 0.85
     else:
-        base_sets = 4
+        base_sets = 3
         diff_rest_mult = 1.0
 
     goal_rest_mult = 1.25 if goal == "strength" else (0.8 if goal == "cut" else 1.0)
@@ -390,8 +401,9 @@ def build_regular_workout(profile: dict) -> dict:
         for idx_ex in range(num_ex_for_muscle):
             ex = candidates[idx_ex % len(candidates)]
             sets = base_sets + (1 if is_priority else 0)
-            if is_priority and num_ex_for_muscle == 1:
+            if is_priority and num_ex_for_muscle == 1 and level == "advanced":
                 sets += 1
+            sets = min(5, sets)
 
             rest_sec = max(30, int(round((ex["rest_sec"] * rest_mult) / 5.0) * 5))
             est_ex_time = sets * (40 + rest_sec) + 60
@@ -580,9 +592,11 @@ def apply_double_progression(ex_item: dict, logged_weight: float, logged_reps: l
             best_set_reps = max(logged_reps) if logged_reps else rep_min
             inc = 5 if is_timed else 1
             next_reps = min(rep_max, max(rep_min, best_set_reps + inc))
+            w_str = f"{logged_weight:g} кг × " if logged_weight > 0 else ""
+            next_w_str = f"{next_weight:g} кг × " if next_weight > 0 else ""
             msg = (
-                f"✅ Записано ({logged_weight:g} кг × {'-'.join(map(str, logged_reps))}). "
-                f"Цель на следующий раз: <b>{next_weight:g} кг × {next_reps} {unit}</b>"
+                f"✅ Записано ({w_str}{'-'.join(map(str, logged_reps))}). "
+                f"Цель на следующий раз: <b>{next_w_str}{next_reps} {unit}</b>"
             )
 
         conn.execute(
@@ -678,11 +692,11 @@ def format_progress_report(profile: dict) -> str:
 
     for r in rows:
         ex = EXERCISE_MAP.get(r["exercise_id"])
-        if not ex or not (ex["is_compound"] or ex["muscle"] in priority):
+        if not ex:
             continue
 
-        init_w = float(r["initial_weight"])
-        curr_w = float(r["current_weight"])
+        init_w = float(r["initial_weight"] or 0.0)
+        curr_w = float(r["current_weight"] or 0.0)
         diff = curr_w - init_w
         tag = "🎯" if ex["muscle"] in priority else "🔹"
         unit = "сек" if ex.get("is_timed") else "повт."
@@ -796,19 +810,22 @@ def main_menu_kb() -> InlineKeyboardMarkup:
 
 
 def plan_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="⏱ 60с", callback_data="timer:60"),
-                InlineKeyboardButton(text="⏱ 90с", callback_data="timer:90"),
-                InlineKeyboardButton(text="⏱ 120с", callback_data="timer:120"),
-                InlineKeyboardButton(text="⏱ 180с", callback_data="timer:180"),
-            ],
-            [InlineKeyboardButton(text="🔄 Заменить упражнение", callback_data="menu:swap_list")],
-            [InlineKeyboardButton(text="📝 Сдать отчет по тренировке", callback_data="menu:report")],
-            [InlineKeyboardButton(text="🔙 В главное меню", callback_data="menu:home")],
-        ]
-    )
+    rows = []
+    w_url = get_webapp_url()
+    if w_url:
+        rows.append([InlineKeyboardButton(text="📱 Открыть тренировку в Mini App", web_app=WebAppInfo(url=w_url))])
+    rows.extend([
+        [
+            InlineKeyboardButton(text="⏱ 60с", callback_data="timer:60"),
+            InlineKeyboardButton(text="⏱ 90с", callback_data="timer:90"),
+            InlineKeyboardButton(text="⏱ 120с", callback_data="timer:120"),
+            InlineKeyboardButton(text="⏱ 180с", callback_data="timer:180"),
+        ],
+        [InlineKeyboardButton(text="🔄 Заменить упражнение", callback_data="menu:swap_list")],
+        [InlineKeyboardButton(text="📝 Сдать отчет по тренировке", callback_data="menu:report")],
+        [InlineKeyboardButton(text="🔙 В главное меню", callback_data="menu:home")],
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def progress_menu_kb() -> InlineKeyboardMarkup:
@@ -821,13 +838,16 @@ def progress_menu_kb() -> InlineKeyboardMarkup:
 
 
 def evening_kick_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🏋️ Показать план на сегодня", callback_data="menu:plan")],
-            [InlineKeyboardButton(text="⚡ Экспресс на 20 мин", callback_data="menu:express")],
-            [InlineKeyboardButton(text="📝 Сдать отчет прямо сейчас", callback_data="menu:report")],
-        ]
-    )
+    rows = []
+    w_url = get_webapp_url()
+    if w_url:
+        rows.append([InlineKeyboardButton(text="📱 Открыть Mini App и закрыть долг", web_app=WebAppInfo(url=w_url))])
+    rows.extend([
+        [InlineKeyboardButton(text="🏋️ Показать план на сегодня", callback_data="menu:plan")],
+        [InlineKeyboardButton(text="⚡ Экспресс на 20 мин", callback_data="menu:express")],
+        [InlineKeyboardButton(text="📝 Сдать отчет прямо сейчас", callback_data="menu:report")],
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_muscles_kb(selected: list[str]) -> InlineKeyboardMarkup:
@@ -1376,8 +1396,9 @@ async def advance_report_step(target_msg: Message, state: FSMContext, logged_wei
     else:
         profile = get_profile(ADMIN_TELEGRAM_ID)
         if logged_results:
+            already_done = has_logged_today(profile)
             save_workout_log(workout_type, logged_results, profile)
-            if workout_type == "regular":
+            if workout_type == "regular" and not already_done:
                 increment_workout_counter(ADMIN_TELEGRAM_ID)
             summary = f"🏁 <b>ОТЧЕТ ПО ТРЕНИРОВКЕ ЗАКРЫТ!</b>\nВыполнено упражнений: <b>{len(logged_results)}/{len(exercises)}</b>.\n\n{random.choice(REPORT_PRAISE_QUOTES)}"
         else:
@@ -1449,7 +1470,11 @@ async def handle_index(request: web.Request) -> web.Response:
     html_path = os.path.join(os.path.dirname(__file__) or ".", "webapp.html")
     with open(html_path, "r", encoding="utf-8") as f:
         content = f.read()
-    return web.Response(text=content, content_type="text/html")
+    return web.Response(
+        text=content,
+        content_type="text/html",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 async def handle_api_state(request: web.Request) -> web.Response:
@@ -1483,11 +1508,14 @@ async def handle_api_state(request: web.Request) -> web.Response:
             continue
         init_w = float(r["initial_weight"] or 0.0)
         curr_w = float(r["current_weight"] or 0.0)
-        est_1rm = round(curr_w * (1 + int(r["target_reps"]) / 30.0), 1) if curr_w > 0 else 0.0
+        t_reps = int(r["target_reps"] or ex["rep_min"])
+        est_1rm = round(curr_w * (1 + t_reps / 30.0), 1) if curr_w > 0 else 0.0
         prog_items.append({
             "id": ex["id"],
             "name": ex["name"],
             "is_priority": ex["muscle"] in priority,
+            "is_timed": ex.get("is_timed", False),
+            "target_reps": t_reps,
             "init_w": init_w,
             "curr_w": curr_w,
             "diff": round(curr_w - init_w, 1),
@@ -1545,17 +1573,29 @@ async def handle_api_swap(request: web.Request) -> web.Response:
 async def handle_api_finish_workout(request: web.Request) -> web.Response:
     profile = get_profile(ADMIN_TELEGRAM_ID)
     plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode="active")
+    already_done = has_logged_today(profile)
+
     logged = [
         {"id": ex["id"], "name": ex["name"], "weight": ex.get("logged_weight", ex["target_weight"]), "reps": ex.get("logged_reps", [ex["target_reps"]] * ex["sets"])}
         for ex in plan["exercises"] if ex.get("logged_today")
     ]
     if not logged:
         for ex in plan["exercises"]:
-            apply_double_progression(ex, float(ex["target_weight"]), [int(ex["target_reps"])] * int(ex["sets"]))
-            logged.append({"id": ex["id"], "name": ex["name"], "weight": ex["target_weight"], "reps": [ex["target_reps"]] * ex["sets"]})
+            w_val = float(ex["target_weight"])
+            r_list = [int(ex["target_reps"])] * int(ex["sets"])
+            apply_double_progression(ex, w_val, r_list)
+            ex["logged_today"] = True
+            ex["logged_weight"] = w_val
+            ex["logged_reps"] = r_list
+            logged.append({"id": ex["id"], "name": ex["name"], "weight": w_val, "reps": r_list})
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE active_workouts SET plan_json = ? WHERE user_id = ?",
+                (json.dumps(plan, ensure_ascii=False), ADMIN_TELEGRAM_ID),
+            )
 
     save_workout_log(plan["workout_type"], logged, profile)
-    if plan["workout_type"] == "regular":
+    if plan["workout_type"] == "regular" and not already_done:
         increment_workout_counter(ADMIN_TELEGRAM_ID)
 
     praise = random.choice(REPORT_PRAISE_QUOTES)

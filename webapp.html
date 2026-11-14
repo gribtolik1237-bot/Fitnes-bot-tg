@@ -182,16 +182,16 @@
 
   /* BIOMECHANICS STAGE */
   .demo-stage {
-    width: 100%; height: 160px; cursor: pointer;
+    width: 100%; height: 174px; cursor: pointer;
     background:
-      linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px),
-      radial-gradient(circle at 50% 45%, #192234 0%, #0a0d14 100%);
-    background-size: 24px 24px, 24px 24px, 100% 100%;
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
+      radial-gradient(circle at 50% 45%, #1a2436 0%, #090c12 100%);
+    background-size: 22px 22px, 22px 22px, 100% 100%;
     border-bottom: 1px solid var(--border);
     position: relative; display: flex; align-items: center; justify-content: center;
   }
-  .demo-stage svg { width: 100%; height: 100%; max-width: 340px; }
+  .demo-stage svg { width: 100%; height: 100%; max-width: 350px; }
   .demo-badge-tl {
     position: absolute; top: 10px; left: 12px;
     display: flex; gap: 6px; flex-wrap: wrap; z-index: 2;
@@ -199,7 +199,7 @@
   .pill {
     font-size: 10px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase;
     padding: 4px 9px; border-radius: 8px;
-    background: rgba(7, 8, 12, 0.8); backdrop-filter: blur(8px);
+    background: rgba(7, 8, 12, 0.82); backdrop-filter: blur(8px);
     border: 1px solid var(--border); color: #e2e8f0;
   }
   .pill-prio { color: var(--lime); border-color: rgba(163, 230, 53, 0.45); }
@@ -207,11 +207,11 @@
   .demo-legend {
     position: absolute; bottom: 8px; right: 12px;
     font-size: 10px; font-weight: 700; color: var(--text-dim);
-    background: rgba(7, 8, 12, 0.75); padding: 3px 8px; border-radius: 6px;
-    border: 1px solid rgba(255,255,255,0.06);
+    background: rgba(7, 8, 12, 0.78); padding: 3px 8px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.07);
   }
 
-  .ex-body { padding: 16px; }
+  .ex-body { padding: 15px; }
   .ex-title { font-size: 16px; font-weight: 800; line-height: 1.3; margin-bottom: 10px; }
 
   .meta-strip {
@@ -229,20 +229,20 @@
   .cue-box {
     background: rgba(255, 255, 255, 0.03);
     border-left: 3px solid var(--lime);
-    padding: 10px 12px; border-radius: 0 11px 11px 0;
+    padding: 9px 12px; border-radius: 0 11px 11px 0;
     font-size: 12px; line-height: 1.45; color: var(--text-dim);
-    margin-bottom: 14px;
+    margin-bottom: 13px;
   }
 
   /* TACTILE SET LOGGING */
   .tracker-box {
     background: #0a0c12; border: 1px solid var(--border);
-    border-radius: 16px; padding: 12px;
+    border-radius: 16px; padding: 11px;
   }
   .weight-bar {
     display: flex; align-items: center; justify-content: space-between;
-    background: var(--surface-2); padding: 8px 12px; border-radius: 12px;
-    margin-bottom: 11px; border: 1px solid var(--border);
+    background: var(--surface-2); padding: 7px 11px; border-radius: 12px;
+    margin-bottom: 10px; border: 1px solid var(--border);
   }
   .weight-label { font-size: 12px; font-weight: 700; color: var(--text-dim); }
   .stepper { display: flex; align-items: center; gap: 8px; }
@@ -268,26 +268,29 @@
   }
   .mini-pill-btn:active { background: var(--lime); color: #07080c; }
 
+  /* COMPACT SINGLE-ROW SETS GRID */
   .sets-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
-    gap: 7px; margin-bottom: 12px;
+    display: grid;
+    grid-template-columns: repeat(var(--sets-cols, 4), minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 11px;
   }
   .set-pill {
     background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: 12px; padding: 7px 4px; text-align: center;
+    border-radius: 11px; padding: 6px 2px; text-align: center;
   }
   .set-pill:focus-within { border-color: var(--lime); background: var(--surface-3); }
-  .set-num { font-size: 9px; text-transform: uppercase; color: var(--text-dim); font-weight: 800; margin-bottom: 3px; }
+  .set-num { font-size: 9px; text-transform: uppercase; color: var(--text-dim); font-weight: 800; margin-bottom: 2px; }
   .set-val-input {
     width: 100%; background: transparent; border: none; text-align: center;
     color: var(--text); font-size: 15px; font-weight: 800; padding: 0;
   }
 
-  .btn-row { display: flex; gap: 8px; }
+  .btn-row { display: flex; gap: 7px; }
   .btn {
-    border: none; border-radius: 13px; padding: 12px 13px;
+    border: none; border-radius: 13px; padding: 11px 12px;
     font-size: 13px; font-weight: 800; cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
     background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
     transition: transform 0.1s ease;
   }
@@ -296,6 +299,10 @@
     background: linear-gradient(135deg, var(--lime), var(--emerald));
     color: #07080c; border: none;
     box-shadow: 0 4px 18px rgba(163, 230, 53, 0.25);
+  }
+  .btn-rest {
+    color: var(--cyan); border-color: rgba(56, 189, 248, 0.3);
+    background: rgba(56, 189, 248, 0.08);
   }
   .btn-danger { background: rgba(244, 63, 94, 0.15); border-color: rgba(244, 63, 94, 0.4); color: #fda4af; }
   .btn-full { width: 100%; padding: 15px; font-size: 14px; }
@@ -391,36 +398,10 @@
     box-shadow: 0 12px 32px rgba(0,0,0,0.7); display: none;
   }
 
-  /* ANCHORED BIOMECHANICS KEYFRAMES */
-  @keyframes pushMotion {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(14px); }
-  }
-  @keyframes rowMotion {
-    0%, 100% { transform: translate(0px, 0px); }
-    50% { transform: translate(-12px, -12px); }
-  }
-  @keyframes squatMotion {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(16px); }
-  }
-  @keyframes thrustMotion {
-    0%, 100% { transform: translateY(11px); }
-    50% { transform: translateY(-6px); }
-  }
-  @keyframes calfMotion {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-  }
   @keyframes glowPulse {
-    0%, 100% { opacity: 0.65; }
+    0%, 100% { opacity: 0.72; }
     50% { opacity: 1; }
   }
-  .anim-push { animation: pushMotion 2.4s infinite ease-in-out; }
-  .anim-row { animation: rowMotion 2.2s infinite ease-in-out; }
-  .anim-squat { animation: squatMotion 2.6s infinite ease-in-out; }
-  .anim-thrust { animation: thrustMotion 2.3s infinite ease-in-out; }
-  .anim-calf { animation: calfMotion 1.9s infinite ease-in-out; }
   .muscle-glow { animation: glowPulse 1.8s infinite ease-in-out; }
 </style>
 </head>
@@ -642,413 +623,478 @@ function updateTimerUI() {
   }
 }
 
-// ЭСТЕТИЧНЫЕ АНАТОМИЧЕСКИЕ SVG-СХЕМЫ С ЖЁСТКОЙ ФИКСАЦИЕЙ КИСТЕЙ И СТОП НА СНАРЯДАХ
+// ==================== ПРОФЕССИОНАЛЬНАЯ 2D-БИОМЕХАНИКА (ТОЧНЫЕ СУСТАВЫ И ТРАЕКТОРИИ) ====================
 function getBiomechanicsSVG(ex) {
   const id = ex.id || '';
   const m = ex.muscle;
   const lime = '#a3e635';
-  const torsoCol = '#334155';
+  const cyan = '#38bdf8';
+  const torsoCol = '#3b4a63';
   const limbCol = '#94a3b8';
-  const headCol = '#cbd5e1';
+  const darkLimb = '#475569';
+  const headCol = '#e2e8f0';
   const equipCol = '#475569';
-  const floorCol = '#263042';
+  const floorCol = '#1e293b';
 
-  // 1. Обратные отжимания от скамьи (tri_bench_dips)
-  if (id === 'tri_bench_dips') {
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <line x1="20" y1="126" x2="300" y2="126" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-      <!-- Скамья слева -->
-      <rect x="52" y="78" width="66" height="10" rx="4" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>
-      <line x1="64" y1="88" x2="64" y2="125" stroke="${equipCol}" stroke-width="5" stroke-linecap="round"/>
-      <line x1="106" y1="88" x2="106" y2="125" stroke="${equipCol}" stroke-width="5" stroke-linecap="round"/>
-      <!-- Кисти на краю скамьи (112, 77) -->
-      <circle cx="112" cy="77" r="4" fill="${lime}"/>
-      <!-- Предплечье от кисти (112,77) к локтю (105,62..78) -->
-      <line x1="112" y1="77" x2="104" y2="60" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
-        <animate attributeName="y2" values="56;76;56" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="x2" values="108;98;108" dur="2.3s" repeatCount="indefinite"/>
+  // 1. ОТЖИМАНИЯ НА БРУСЬЯХ (chest_dips / tri_vertical_dips) — НАГЛЯДНЫЙ ВИД СБОКУ!
+  if (id === 'chest_dips' || id === 'tri_vertical_dips') {
+    const isChest = id === 'chest_dips';
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <!-- Пол и стойка брусьев (вид сбоку) -->
+      <line x1="20" y1="142" x2="300" y2="142" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      <line x1="88" y1="78" x2="88" y2="142" stroke="#1e293b" stroke-width="7" stroke-linecap="round"/>
+      <line x1="210" y1="78" x2="210" y2="142" stroke="#1e293b" stroke-width="7" stroke-linecap="round"/>
+      <line x1="74" y1="78" x2="226" y2="78" stroke="${equipCol}" stroke-width="6" stroke-linecap="round"/>
+
+      <!-- Направляющий угол наклона корпуса -->
+      <text x="248" y="34" fill="${lime}" font-size="10" font-weight="800" text-anchor="middle">${isChest ? 'НАКЛОН 30° • ГРУДЬ' : 'КОРПУС РОВНО • ТРИЦЕПС'}</text>
+      <text x="248" y="48" fill="${cyan}" font-size="9.5" font-weight="700" text-anchor="middle">ЛОКОТЬ ДО 90°</text>
+
+      <!-- Неподвижное предплечье от кисти на жерди (156,78) к локтю -->
+      <line x1="156" y1="78" x2="148" y2="54" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
+        <animate attributeName="x2" values="${isChest ? '150;126;150' : '152;130;152'}" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="${isChest ? '54;62;54' : '54;64;54'}" dur="2.4s" repeatCount="indefinite"/>
       </line>
-      <!-- Плечевая кость от локтя к плечу -->
-      <line x1="108" y1="56" x2="132" y2="66" stroke="${lime}" stroke-width="7" stroke-linecap="round" class="muscle-glow">
-        <animate attributeName="x1" values="108;98;108" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y1" values="56;76;56" dur="2.3s" repeatCount="indefinite"/>
+
+      <!-- Плечевая кость от локтя к плечу (показывает сгибание до 90 градусов) -->
+      <line x1="150" y1="54" x2="${isChest ? 168 : 158}" y2="36" stroke="${isChest ? limbCol : lime}" stroke-width="7.5" stroke-linecap="round" class="${isChest ? '' : 'muscle-glow'}">
+        <animate attributeName="x1" values="${isChest ? '150;126;150' : '152;130;152'}" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="${isChest ? '54;62;54' : '54;64;54'}" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="36;62;36" dur="2.4s" repeatCount="indefinite"/>
+      </line>
+
+      <!-- Движущийся корпус, грудная мышца, голова и ноги (вид сбоку) -->
+      <g>
+        <animateTransform attributeName="transform" type="translate" values="0,0; 0,26; 0,0" dur="2.4s" repeatCount="indefinite"/>
+        ${isChest ? `
+          <!-- Корпус с наклоном 30 градусов вперед (вправо) -->
+          <line x1="138" y1="78" x2="168" y2="36" stroke="${torsoCol}" stroke-width="14" stroke-linecap="round"/>
+          <!-- Акцент на грудную мышцу спереди торса -->
+          <path d="M169 38 C179 44, 177 57, 163 62 L156 54 Z" fill="${lime}" class="muscle-glow"/>
+          <circle cx="179" cy="23" r="9" fill="${headCol}"/>
+          <!-- Согнутые в коленях ноги сзади -->
+          <polyline points="138,78 124,106 106,102" stroke="${darkLimb}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+        ` : `
+          <!-- Вертикальный корпус для трицепса -->
+          <line x1="156" y1="80" x2="158" y2="36" stroke="${torsoCol}" stroke-width="13" stroke-linecap="round"/>
+          <circle cx="159" cy="22" r="9" fill="${headCol}"/>
+          <polyline points="156,80 154,110 140,112" stroke="${darkLimb}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+        `}
+      </g>
+
+      <!-- Сустав локтя и жестко зафиксированная кисть на брусьях -->
+      <circle cx="156" cy="78" r="5" fill="${lime}"/>
+    </svg>`;
+  }
+
+  // 2. ОТЖИМАНИЯ «ДОМИКОМ» В ПЛЕЧИ (sh_pike_pushups) — ЧЕТКИЙ ТРЕУГОЛЬНИК И УХОД МАКУШКИ ВПЕРЕД ЗА ЛАДОНИ!
+  if (id === 'sh_pike_pushups') {
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="20" y1="134" x2="300" y2="134" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      <!-- Целевая точка касания макушкой впереди ладоней -->
+      <circle cx="238" cy="134" r="3.5" fill="${cyan}"/>
+      <text x="238" y="148" fill="${cyan}" font-size="9" font-weight="800" text-anchor="middle">ТОЧКА МАКУШКИ</text>
+      <text x="136" y="28" fill="${lime}" font-size="10" font-weight="800" text-anchor="middle">ТАЗ ВЫСОКО ВВЕРХ • АКЦЕНТ НА ДЕЛЬТЫ</text>
+
+      <!-- Зафиксированные стопы (68,131) и прямые ноги до поднятого таза (136,48) -->
+      <circle cx="68" cy="131" r="4.5" fill="${headCol}"/>
+      <line x1="68" y1="131" x2="136" y2="48" stroke="${darkLimb}" stroke-width="10" stroke-linecap="round">
+        <animate attributeName="x2" values="136;144;136" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="48;56;48" dur="2.4s" repeatCount="indefinite"/>
+      </line>
+
+      <!-- Спина от таза к плечам (уходит вперед и вниз к точке перед ладонями) -->
+      <line x1="136" y1="48" x2="196" y2="86" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round">
+        <animate attributeName="x1" values="136;144;136" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="48;56;48" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="x2" values="196;220;196" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="86;108;86" dur="2.4s" repeatCount="indefinite"/>
+      </line>
+
+      <!-- Предплечье от ладони на полу (206,131) к локтю -->
+      <line x1="206" y1="131" x2="202" y2="108" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
+        <animate attributeName="x2" values="202;216;202" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="108;112;108" dur="2.4s" repeatCount="indefinite"/>
+      </line>
+
+      <!-- Плечевая кость и светящаяся дельта -->
+      <line x1="202" y1="108" x2="196" y2="86" stroke="${lime}" stroke-width="7.5" stroke-linecap="round" class="muscle-glow">
+        <animate attributeName="x1" values="202;216;202" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="108;112;108" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="x2" values="196;220;196" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="86;108;86" dur="2.4s" repeatCount="indefinite"/>
+      </line>
+
+      <!-- Светящийся шар дельтовидной мышцы и голова, движущаяся к отметке 238 -->
+      <circle cx="196" cy="86" r="7.5" fill="${lime}" class="muscle-glow">
+        <animate attributeName="cx" values="196;220;196" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="cy" values="86;108;86" dur="2.4s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="214" cy="96" r="9" fill="${headCol}">
+        <animate attributeName="cx" values="214;236;214" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="cy" values="96;121;96" dur="2.4s" repeatCount="indefinite"/>
+      </circle>
+
+      <!-- Ладонь на полу -->
+      <circle cx="206" cy="131" r="5" fill="${lime}"/>
+    </svg>`;
+  }
+
+  // 3. ОБРАТНЫЕ ОТЖИМАНИЯ ОТ СКАМЬИ (tri_bench_dips)
+  if (id === 'tri_bench_dips') {
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="20" y1="132" x2="300" y2="132" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      <rect x="48" y="82" width="66" height="10" rx="4" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>
+      <line x1="60" y1="92" x2="60" y2="131" stroke="${equipCol}" stroke-width="5" stroke-linecap="round"/>
+      <line x1="102" y1="92" x2="102" y2="131" stroke="${equipCol}" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="110" cy="81" r="4.5" fill="${lime}"/>
+      <line x1="110" y1="81" x2="102" y2="62" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
+        <animate attributeName="y2" values="58;78;58" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="x2" values="104;92;104" dur="2.3s" repeatCount="indefinite"/>
+      </line>
+      <line x1="104" y1="58" x2="132" y2="66" stroke="${lime}" stroke-width="7.5" stroke-linecap="round" class="muscle-glow">
+        <animate attributeName="x1" values="104;92;104" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="58;78;58" dur="2.3s" repeatCount="indefinite"/>
         <animate attributeName="y2" values="64;88;64" dur="2.3s" repeatCount="indefinite"/>
       </line>
-      <!-- Корпус и голова -->
       <g>
         <animateTransform attributeName="transform" type="translate" values="0,0; 0,22; 0,0" dur="2.3s" repeatCount="indefinite"/>
         <circle cx="134" cy="44" r="9" fill="${headCol}"/>
-        <line x1="133" y1="53" x2="133" y2="62" stroke="${headCol}" stroke-width="5" stroke-linecap="round"/>
-        <path d="M126 62 Q133 59 140 62 L143 96 Q135 100 128 96 Z" fill="${torsoCol}"/>
+        <path d="M126 60 Q133 57 140 60 L143 96 Q135 100 128 96 Z" fill="${torsoCol}"/>
       </g>
-      <!-- Ноги от таза (136,96..118) к пяткам на полу (224,122) -->
-      <line x1="136" y1="96" x2="224" y2="122" stroke="${limbCol}" stroke-width="8" stroke-linecap="round">
-        <animate attributeName="y1" values="96;116;96" dur="2.3s" repeatCount="indefinite"/>
+      <line x1="136" y1="96" x2="228" y2="128" stroke="${darkLimb}" stroke-width="8.5" stroke-linecap="round">
+        <animate attributeName="y1" values="96;118;96" dur="2.3s" repeatCount="indefinite"/>
       </line>
     </svg>`;
   }
 
-  // 2. Отжимания на брусьях (chest_dips, tri_vertical_dips) — кисти жёстко стоят на брусьях!
-  if (id.includes('dips')) {
-    const isChest = id === 'chest_dips';
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <!-- Опоры брусьев -->
-      <line x1="112" y1="74" x2="112" y2="132" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>
-      <line x1="208" y1="74" x2="208" y2="132" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>
-      <line x1="96" y1="74" x2="224" y2="74" stroke="${equipCol}" stroke-width="6" stroke-linecap="round"/>
-
-      <!-- Предплечья: кисти жёстко на брусьях (124,74) и (196,74), локти сгибаются в стороны -->
-      <line x1="124" y1="74" x2="122" y2="54" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
-        <animate attributeName="x2" values="122;112;122" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="54;72;54" dur="2.3s" repeatCount="indefinite"/>
-      </line>
-      <line x1="196" y1="74" x2="198" y2="54" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
-        <animate attributeName="x2" values="198;208;198" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="54;72;54" dur="2.3s" repeatCount="indefinite"/>
-      </line>
-
-      <!-- Плечевые кости: от локтей к плечам (142,40->62) и (178,40->62) -->
-      <line x1="122" y1="54" x2="142" y2="40" stroke="${isChest ? limbCol : lime}" stroke-width="7" stroke-linecap="round" class="${isChest ? '' : 'muscle-glow'}">
-        <animate attributeName="x1" values="122;112;122" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y1" values="54;72;54" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="40;62;40" dur="2.3s" repeatCount="indefinite"/>
-      </line>
-      <line x1="198" y1="54" x2="178" y2="40" stroke="${isChest ? limbCol : lime}" stroke-width="7" stroke-linecap="round" class="${isChest ? '' : 'muscle-glow'}">
-        <animate attributeName="x1" values="198;208;198" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y1" values="54;72;54" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="40;62;40" dur="2.3s" repeatCount="indefinite"/>
-      </line>
-
-      <!-- Фиксированные кисти на перекладинах -->
-      <circle cx="124" cy="74" r="4.5" fill="${lime}"/>
-      <circle cx="196" cy="74" r="4.5" fill="${lime}"/>
-
-      <!-- Движущийся атлет -->
-      <g>
-        <animateTransform attributeName="transform" type="translate" values="0,0; 0,22; 0,0" dur="2.3s" repeatCount="indefinite"/>
-        <circle cx="160" cy="21" r="9" fill="${headCol}"/>
-        <line x1="160" y1="30" x2="160" y2="37" stroke="${headCol}" stroke-width="5" stroke-linecap="round"/>
-        <!-- Спортивный V-образный торс -->
-        <path d="M138 40 C138 36, 182 36, 182 40 L173 82 C173 86, 147 86, 147 82 Z" fill="${torsoCol}"/>
-        ${isChest ? `
-          <path d="M142 43 Q159 49 158 58 Q145 58 142 49 Z" fill="${lime}" class="muscle-glow"/>
-          <path d="M178 43 Q161 49 162 58 Q175 58 178 49 Z" fill="${lime}" class="muscle-glow"/>
-        ` : ''}
-        <!-- Ноги -->
-        <line x1="153" y1="84" x2="151" y2="114" stroke="${torsoCol}" stroke-width="7" stroke-linecap="round"/>
-        <line x1="167" y1="84" x2="169" y2="114" stroke="${torsoCol}" stroke-width="7" stroke-linecap="round"/>
-      </g>
-    </svg>`;
-  }
-
-  // 3. Австралийские подтягивания на низкой перекладине (back_australian_pullups)
-  if (id === 'back_australian_pullups') {
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <line x1="20" y1="126" x2="300" y2="126" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-      <!-- Стойка низкой перекладины справа -->
-      <line x1="224" y1="42" x2="224" y2="126" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>
-      <circle cx="216" cy="46" r="5" fill="${equipCol}"/>
-      <!-- Пятки жёстко стоят на полу (68, 122) -->
-      <circle cx="68" cy="122" r="4" fill="${headCol}"/>
-
-      <!-- Прямое тело под углом, тянущееся грудью к перекладине (216, 46) -->
-      <g>
-        <animateTransform attributeName="transform" type="rotate" values="0 68 122; -16 68 122; 0 68 122" dur="2.3s" repeatCount="indefinite"/>
-        <!-- Ноги + корпус одной прямой линией -->
-        <line x1="68" y1="122" x2="196" y2="78" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-        <!-- Подсветка спины -->
-        <line x1="146" y1="95" x2="192" y2="79" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
-        <!-- Шея и голова -->
-        <circle cx="215" cy="71" r="9" fill="${headCol}"/>
-      </g>
-
-      <!-- Рука от плеча (194,78 -> 203,56) к фиксированной кисти на перекладине (216,46) -->
-      <line x1="216" y1="46" x2="194" y2="78" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
-        <animate attributeName="x2" values="194;203;194" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="78;56;78" dur="2.3s" repeatCount="indefinite"/>
-      </line>
-      <circle cx="216" cy="46" r="4.5" fill="${lime}"/>
-    </svg>`;
-  }
-
-  // 4. Классические подтягивания / на бицепс (back_pullups, bi_chin_ups) — кисти жёстко на турнике!
-  if (id === 'back_pullups' || id === 'bi_chin_ups') {
-    const isBi = id === 'bi_chin_ups';
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <!-- Турник -->
-      <line x1="88" y1="20" x2="232" y2="20" stroke="${equipCol}" stroke-width="6" stroke-linecap="round"/>
-
-      <!-- Предплечья: кисти жёстко на перекладине (132,20) и (188,20) -->
-      <line x1="132" y1="20" x2="132" y2="42" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
-        <animate attributeName="x2" values="132;120;132" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="42;34;42" dur="2.4s" repeatCount="indefinite"/>
-      </line>
-      <line x1="188" y1="20" x2="188" y2="42" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
-        <animate attributeName="x2" values="188;200;188" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="42;34;42" dur="2.4s" repeatCount="indefinite"/>
-      </line>
-
-      <!-- Плечевые кости: от локтей к плечам (140,62 -> 140,42) -->
-      <line x1="132" y1="42" x2="140" y2="62" stroke="${isBi ? lime : limbCol}" stroke-width="7" stroke-linecap="round" class="${isBi ? 'muscle-glow' : ''}">
-        <animate attributeName="x1" values="132;120;132" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y1" values="42;34;42" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="62;42;62" dur="2.4s" repeatCount="indefinite"/>
-      </line>
-      <line x1="188" y1="42" x2="180" y2="62" stroke="${isBi ? lime : limbCol}" stroke-width="7" stroke-linecap="round" class="${isBi ? 'muscle-glow' : ''}">
-        <animate attributeName="x1" values="188;200;188" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y1" values="42;34;42" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="62;42;62" dur="2.4s" repeatCount="indefinite"/>
-      </line>
-
-      <!-- Фиксированные кисти -->
-      <circle cx="132" cy="20" r="4.5" fill="${lime}"/>
-      <circle cx="188" cy="20" r="4.5" fill="${lime}"/>
-
-      <!-- Движущийся корпус атлета -->
-      <g>
-        <animateTransform attributeName="transform" type="translate" values="0,0; 0,-20; 0,0" dur="2.4s" repeatCount="indefinite"/>
-        <circle cx="160" cy="44" r="9" fill="${headCol}"/>
-        <line x1="160" y1="53" x2="160" y2="60" stroke="${headCol}" stroke-width="5" stroke-linecap="round"/>
-        <path d="M138 62 C138 58, 182 58, 182 62 L173 102 C173 106, 147 106, 147 102 Z" fill="${torsoCol}"/>
-        ${!isBi ? `
-          <path d="M140 64 L158 72 L153 96 L146 86 Z" fill="${lime}" class="muscle-glow"/>
-          <path d="M180 64 L162 72 L167 96 L174 86 Z" fill="${lime}" class="muscle-glow"/>
-        ` : ''}
-        <line x1="153" y1="104" x2="152" y2="136" stroke="${torsoCol}" stroke-width="7" stroke-linecap="round"/>
-        <line x1="167" y1="104" x2="168" y2="136" stroke="${torsoCol}" stroke-width="7" stroke-linecap="round"/>
-      </g>
-    </svg>`;
-  }
-
-  // 5. Отжимания от пола / с возвышенности / алмазные / домиком — ладони жёстко на полу!
+  // 4. КЛАССИЧЕСКИЕ / НАКЛОННЫЕ / АЛМАЗНЫЕ ОТЖИМАНИЯ ОТ ПОЛА
   if (id.includes('pushup')) {
     const isDecline = id.includes('decline');
-    const isPike = id.includes('pike');
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <line x1="20" y1="126" x2="300" y2="126" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-      ${isDecline ? `<rect x="40" y="96" width="52" height="30" rx="5" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>` : ''}
-      <!-- Ладони на полу (218, 123) -->
-      <circle cx="218" cy="123" r="4.5" fill="${lime}"/>
-      <!-- Предплечье от ладони к локтю -->
-      <line x1="218" y1="123" x2="214" y2="104" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
-        <animate attributeName="x2" values="214;204;214" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="104;112;104" dur="2.3s" repeatCount="indefinite"/>
+    const isDiamond = id.includes('diamond');
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="20" y1="132" x2="300" y2="132" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      ${isDecline ? `<rect x="36" y="96" width="54" height="34" rx="5" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>` : ''}
+      <text x="160" y="28" fill="${lime}" font-size="10" font-weight="800" text-anchor="middle">${isDiamond ? 'УЗКИЙ УПОР • АКЦЕНТ НА ТРИЦЕПС' : (isDecline ? 'НОГИ НА ОПОРЕ • ВЕРХ ГРУДИ' : 'КОРПУС СТРУНОЙ • ПАУЗА ВНИЗУ')}</text>
+
+      <!-- Предплечье от ладони (216,129) к локтю -->
+      <line x1="216" y1="129" x2="206" y2="104" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
+        <animate attributeName="x2" values="210;190;210" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="102;110;102" dur="2.3s" repeatCount="indefinite"/>
       </line>
-      <!-- Плечевая кость от локтя к плечу (216,86 -> 216,104) -->
-      <line x1="214" y1="104" x2="216" y2="86" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
-        <animate attributeName="x1" values="214;204;214" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y1" values="104;112;104" dur="2.3s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="86;104;86" dur="2.3s" repeatCount="indefinite"/>
+      <!-- Плечевая кость от локтя к плечу -->
+      <line x1="210" y1="102" x2="214" y2="82" stroke="${isDiamond ? lime : limbCol}" stroke-width="7" stroke-linecap="round" class="${isDiamond ? 'muscle-glow' : ''}">
+        <animate attributeName="x1" values="210;190;210" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="102;110;102" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="82;108;82" dur="2.3s" repeatCount="indefinite"/>
       </line>
 
-      <!-- Корпус, вращающийся вокруг опорных стоп -->
+      <!-- Прямой корпус + ноги от стоп к плечам -->
       <g>
         <animateTransform attributeName="transform" type="rotate"
-          values="${isDecline ? '0 72 94; 7 72 94; 0 72 94' : '0 66 122; 7 66 122; 0 66 122'}"
+          values="${isDecline ? '0 68 94; 9.5 68 94; 0 68 94' : '0 64 128; 9.5 64 128; 0 64 128'}"
           dur="2.3s" repeatCount="indefinite"/>
-        ${isPike
-          ? `<polyline points="66,122 132,54 216,86" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
-             <line x1="158" y1="64" x2="206" y2="82" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>`
-          : `<line x1="${isDecline ? 72 : 66}" y1="${isDecline ? 94 : 122}" x2="216" y2="86" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-             <line x1="164" y1="98" x2="210" y2="88" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>`
-        }
-        <circle cx="238" cy="81" r="9.5" fill="${headCol}"/>
+        <line x1="${isDecline ? 68 : 64}" y1="${isDecline ? 94 : 128}" x2="214" y2="82" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round"/>
+        ${!isDiamond ? `<line x1="162" y1="${isDecline ? 87 : 98}" x2="210" y2="83" stroke="${lime}" stroke-width="12" stroke-linecap="round" class="muscle-glow"/>` : ''}
+        <circle cx="235" cy="77" r="9.5" fill="${headCol}"/>
+      </g>
+      <circle cx="216" cy="129" r="5" fill="${lime}"/>
+    </svg>`;
+  }
+
+  // 5. АВСТРАЛИЙСКИЕ ПОДТЯГИВАНИЯ НА НИЗКОЙ ПЕРЕКЛАДИНЕ (back_australian_pullups)
+  if (id === 'back_australian_pullups') {
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="20" y1="132" x2="300" y2="132" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      <line x1="224" y1="44" x2="224" y2="132" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>
+      <circle cx="68" cy="128" r="4.5" fill="${headCol}"/>
+      <g>
+        <animateTransform attributeName="transform" type="rotate" values="0 68 128; -16 68 128; 0 68 128" dur="2.3s" repeatCount="indefinite"/>
+        <line x1="68" y1="128" x2="196" y2="82" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
+        <line x1="146" y1="100" x2="192" y2="83" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
+        <circle cx="215" cy="75" r="9" fill="${headCol}"/>
+      </g>
+      <line x1="216" y1="48" x2="194" y2="82" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
+        <animate attributeName="x2" values="194;203;194" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="82;58;82" dur="2.3s" repeatCount="indefinite"/>
+      </line>
+      <circle cx="216" cy="48" r="5" fill="${lime}"/>
+    </svg>`;
+  }
+
+  // 6. КЛАССИЧЕСКИЕ ПОДТЯГИВАНИЯ / ПОДТЯГИВАНИЯ ОБРАТНЫМ ХВАТОМ (back_pullups, bi_chin_ups)
+  if (id === 'back_pullups' || id === 'bi_chin_ups') {
+    const isBi = id === 'bi_chin_ups';
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="84" y1="22" x2="236" y2="22" stroke="${equipCol}" stroke-width="6" stroke-linecap="round"/>
+      <!-- Предплечья от кистей на турнике к локтям -->
+      <line x1="${isBi ? 142 : 124}" y1="22" x2="126" y2="48" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
+        <animate attributeName="x2" values="${isBi ? '138;134;138' : '124;112;124'}" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="48;38;48" dur="2.4s" repeatCount="indefinite"/>
+      </line>
+      <line x1="${isBi ? 178 : 196}" y1="22" x2="194" y2="48" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
+        <animate attributeName="x2" values="${isBi ? '182;186;182' : '196;208;196'}" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="48;38;48" dur="2.4s" repeatCount="indefinite"/>
+      </line>
+      <!-- Плечевые кости -->
+      <line x1="124" y1="48" x2="138" y2="66" stroke="${isBi ? lime : limbCol}" stroke-width="7" stroke-linecap="round" class="${isBi ? 'muscle-glow' : ''}">
+        <animate attributeName="x1" values="${isBi ? '138;134;138' : '124;112;124'}" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="48;38;48" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="66;42;66" dur="2.4s" repeatCount="indefinite"/>
+      </line>
+      <line x1="196" y1="48" x2="182" y2="66" stroke="${isBi ? lime : limbCol}" stroke-width="7" stroke-linecap="round" class="${isBi ? 'muscle-glow' : ''}">
+        <animate attributeName="x1" values="${isBi ? '182;186;182' : '196;208;196'}" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="48;38;48" dur="2.4s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="66;42;66" dur="2.4s" repeatCount="indefinite"/>
+      </line>
+      <circle cx="${isBi ? 142 : 124}" cy="22" r="4.5" fill="${lime}"/>
+      <circle cx="${isBi ? 178 : 196}" cy="22" r="4.5" fill="${lime}"/>
+      <g>
+        <animateTransform attributeName="transform" type="translate" values="0,0; 0,-24; 0,0" dur="2.4s" repeatCount="indefinite"/>
+        <circle cx="160" cy="48" r="9" fill="${headCol}"/>
+        <path d="M136 64 C136 60, 184 60, 184 64 L173 106 C173 110, 147 110, 147 106 Z" fill="${torsoCol}"/>
+        ${!isBi ? `
+          <path d="M138 66 L156 76 L151 100 L142 88 Z" fill="${lime}" class="muscle-glow"/>
+          <path d="M182 66 L164 76 L169 100 L178 88 Z" fill="${lime}" class="muscle-glow"/>
+        ` : ''}
+        <line x1="153" y1="108" x2="152" y2="142" stroke="${darkLimb}" stroke-width="7.5" stroke-linecap="round"/>
+        <line x1="167" y1="108" x2="168" y2="142" stroke="${darkLimb}" stroke-width="7.5" stroke-linecap="round"/>
       </g>
     </svg>`;
   }
 
-  // 6. Пресс (Планка / Подъем ног / Скручивания)
+  // 7. ПРЕСС (Планка / Подъем ног / Скручивания)
   if (m === 'abs') {
     if (id.includes('plank')) {
-      return `<svg viewBox="0 0 320 148" fill="none">
-        <line x1="20" y1="124" x2="300" y2="124" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-        <polyline points="214,96 214,121 238,121" stroke="${limbCol}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-        <line x1="65" y1="120" x2="216" y2="92" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-        <line x1="126" y1="109" x2="178" y2="99" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
-        <circle cx="238" cy="85" r="9.5" fill="${headCol}"/>
-        <text x="160" y="42" fill="${lime}" font-size="11" font-weight="800" text-anchor="middle">ТАЗ ПОДКРУЧЕН • ПРЕСС В СТАТИКЕ</text>
+      return `<svg viewBox="0 0 320 156" fill="none">
+        <line x1="20" y1="130" x2="300" y2="130" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+        <polyline points="214,100 214,127 238,127" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <line x1="65" y1="126" x2="216" y2="96" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round"/>
+        <line x1="124" y1="114" x2="180" y2="103" stroke="${lime}" stroke-width="12" stroke-linecap="round" class="muscle-glow"/>
+        <circle cx="238" cy="89" r="9.5" fill="${headCol}"/>
+        <text x="160" y="38" fill="${lime}" font-size="10.5" font-weight="800" text-anchor="middle">ТАЗ ПОДКРУЧЕН • ПРЕСС В СТАТИКЕ</text>
       </svg>`;
     }
     if (id.includes('raise')) {
-      return `<svg viewBox="0 0 320 148" fill="none">
-        <line x1="100" y1="18" x2="220" y2="18" stroke="${equipCol}" stroke-width="5" stroke-linecap="round"/>
-        <line x1="145" y1="18" x2="145" y2="74" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-        <circle cx="145" cy="34" r="8.5" fill="${headCol}"/>
-        <line x1="145" y1="54" x2="145" y2="76" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
+      return `<svg viewBox="0 0 320 156" fill="none">
+        <line x1="100" y1="20" x2="220" y2="20" stroke="${equipCol}" stroke-width="5" stroke-linecap="round"/>
+        <line x1="145" y1="20" x2="145" y2="78" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
+        <circle cx="145" cy="36" r="8.5" fill="${headCol}"/>
+        <line x1="145" y1="56" x2="145" y2="80" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
         <g>
-          <animateTransform attributeName="transform" type="rotate" values="0 145 76; -75 145 76; 0 145 76" dur="2.2s" repeatCount="indefinite"/>
-          <line x1="145" y1="76" x2="145" y2="126" stroke="${limbCol}" stroke-width="8" stroke-linecap="round"/>
+          <animateTransform attributeName="transform" type="rotate" values="0 145 80; -82 145 80; 0 145 80" dur="2.2s" repeatCount="indefinite"/>
+          <line x1="145" y1="80" x2="145" y2="134" stroke="${limbCol}" stroke-width="8.5" stroke-linecap="round"/>
         </g>
       </svg>`;
     }
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <line x1="20" y1="124" x2="300" y2="124" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-      <polyline points="78,121 114,78 154,119" stroke="${torsoCol}" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="20" y1="130" x2="300" y2="130" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      <polyline points="78,127 114,82 154,125" stroke="${darkLimb}" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
       <g>
-        <animateTransform attributeName="transform" type="rotate" values="0 154 119; -32 154 119; 0 154 119" dur="2.2s" repeatCount="indefinite"/>
-        <line x1="154" y1="119" x2="226" y2="115" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-        <line x1="162" y1="118" x2="198" y2="116" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
-        <circle cx="245" cy="111" r="9.5" fill="${headCol}"/>
+        <animateTransform attributeName="transform" type="rotate" values="0 154 125; -34 154 125; 0 154 125" dur="2.2s" repeatCount="indefinite"/>
+        <line x1="154" y1="125" x2="226" y2="121" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
+        <line x1="162" y1="124" x2="198" y2="122" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
+        <circle cx="245" cy="117" r="9.5" fill="${headCol}"/>
       </g>
     </svg>`;
   }
 
-  // 7. Жим лежа / Разводка (Грудь)
+  // 8. ЖИМ ЛЕЖА / РАЗВОДКА (ГРУДЬ) — С ПОЛНЫМ СГИБАНИЕМ ЛОКТЕЙ
   if (m === 'chest') {
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <rect x="75" y="102" width="160" height="8" rx="4" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>
-      <line x1="95" y1="110" x2="95" y2="128" stroke="${equipCol}" stroke-width="5"/>
-      <line x1="215" y1="110" x2="215" y2="128" stroke="${equipCol}" stroke-width="5"/>
-      <line x1="92" y1="94" x2="205" y2="94" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-      <line x1="160" y1="94" x2="198" y2="94" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
-      <circle cx="222" cy="91" r="9.5" fill="${headCol}"/>
-      <g class="anim-push">
-        <line x1="182" y1="92" x2="182" y2="44" stroke="${limbCol}" stroke-width="6" stroke-linecap="round"/>
-        <circle cx="182" cy="42" r="13" fill="#0f172a" stroke="${lime}" stroke-width="4"/>
-      </g>
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <rect x="70" y="106" width="166" height="9" rx="4" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>
+      <line x1="92" y1="115" x2="92" y2="136" stroke="${equipCol}" stroke-width="5"/>
+      <line x1="214" y1="115" x2="214" y2="136" stroke="${equipCol}" stroke-width="5"/>
+      <line x1="88" y1="97" x2="205" y2="97" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round"/>
+      <line x1="158" y1="97" x2="198" y2="97" stroke="${lime}" stroke-width="12" stroke-linecap="round" class="muscle-glow"/>
+      <circle cx="224" cy="94" r="9.5" fill="${headCol}"/>
+      <!-- Плечо + предплечье + штанга -->
+      <line x1="184" y1="95" x2="170" y2="72" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
+        <animate attributeName="x2" values="184;164;184" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="66;104;66" dur="2.3s" repeatCount="indefinite"/>
+      </line>
+      <line x1="184" y1="66" x2="184" y2="38" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
+        <animate attributeName="x1" values="184;164;184" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="66;104;66" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="38;74;38" dur="2.3s" repeatCount="indefinite"/>
+      </line>
+      <circle cx="184" cy="36" r="13" fill="#0f172a" stroke="${lime}" stroke-width="4">
+        <animate attributeName="cy" values="36;72;36" dur="2.3s" repeatCount="indefinite"/>
+      </circle>
     </svg>`;
   }
 
-  // 8. Тяги спины
+  // 9. ТЯГИ СПИНЫ В НАКЛОНЕ / БЛОКАХ
   if (m === 'back') {
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <line x1="40" y1="126" x2="280" y2="126" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-      <polyline points="118,124 134,82 204,54" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
-      <line x1="150" y1="75" x2="194" y2="58" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="40" y1="132" x2="280" y2="132" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      <polyline points="116,130 132,84 204,54" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="148" y1="77" x2="194" y2="58" stroke="${lime}" stroke-width="12" stroke-linecap="round" class="muscle-glow"/>
       <circle cx="222" cy="48" r="9.5" fill="${headCol}"/>
-      <g class="anim-row">
-        <line x1="194" y1="60" x2="194" y2="104" stroke="${limbCol}" stroke-width="6" stroke-linecap="round"/>
-        <circle cx="194" cy="106" r="11" fill="#0f172a" stroke="${lime}" stroke-width="3.5"/>
-      </g>
+      <!-- Сгибание руки к поясу -->
+      <line x1="192" y1="60" x2="192" y2="86" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
+        <animate attributeName="x2" values="192;166;192" dur="2.2s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="86;56;86" dur="2.2s" repeatCount="indefinite"/>
+      </line>
+      <line x1="192" y1="86" x2="194" y2="112" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
+        <animate attributeName="x1" values="192;166;192" dur="2.2s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="86;56;86" dur="2.2s" repeatCount="indefinite"/>
+        <animate attributeName="x2" values="194;176;194" dur="2.2s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="112;82;112" dur="2.2s" repeatCount="indefinite"/>
+      </line>
+      <circle cx="194" cy="114" r="11" fill="#0f172a" stroke="${lime}" stroke-width="3.5">
+        <animate attributeName="cx" values="194;176;194" dur="2.2s" repeatCount="indefinite"/>
+        <animate attributeName="cy" values="114;84;114" dur="2.2s" repeatCount="indefinite"/>
+      </circle>
     </svg>`;
   }
 
-  // 9. Плечи (Махи vs Жимы)
+  // 10. ПЛЕЧИ (Махи в стороны vs Жимы вверх)
   if (m === 'shoulders') {
     if (id.includes('raise') || id.includes('fly') || id.includes('rear')) {
-      return `<svg viewBox="0 0 320 148" fill="none">
-        <circle cx="160" cy="34" r="9.5" fill="${headCol}"/>
-        <path d="M138 52 C138 48, 182 48, 182 52 L174 118 L146 118 Z" fill="${torsoCol}"/>
-        <circle cx="136" cy="54" r="8.5" fill="${lime}" class="muscle-glow"/>
-        <circle cx="184" cy="54" r="8.5" fill="${lime}" class="muscle-glow"/>
+      return `<svg viewBox="0 0 320 156" fill="none">
+        <circle cx="160" cy="36" r="9.5" fill="${headCol}"/>
+        <path d="M138 54 C138 50, 182 50, 182 54 L174 124 L146 124 Z" fill="${torsoCol}"/>
+        <circle cx="136" cy="56" r="8.5" fill="${lime}" class="muscle-glow"/>
+        <circle cx="184" cy="56" r="8.5" fill="${lime}" class="muscle-glow"/>
         <g>
-          <animateTransform attributeName="transform" type="rotate" values="0 136 54; 72 136 54; 0 136 54" dur="2.2s" repeatCount="indefinite"/>
-          <line x1="136" y1="54" x2="122" y2="102" stroke="${limbCol}" stroke-width="6" stroke-linecap="round"/>
-          <rect x="115" y="100" width="14" height="7" rx="3" fill="${lime}"/>
+          <animateTransform attributeName="transform" type="rotate" values="0 136 56; 74 136 56; 0 136 56" dur="2.2s" repeatCount="indefinite"/>
+          <line x1="136" y1="56" x2="122" y2="106" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round"/>
+          <rect x="115" y="104" width="14" height="7" rx="3" fill="${lime}"/>
         </g>
         <g>
-          <animateTransform attributeName="transform" type="rotate" values="0 184 54; -72 184 54; 0 184 54" dur="2.2s" repeatCount="indefinite"/>
-          <line x1="184" y1="54" x2="198" y2="102" stroke="${limbCol}" stroke-width="6" stroke-linecap="round"/>
-          <rect x="191" y="100" width="14" height="7" rx="3" fill="${lime}"/>
+          <animateTransform attributeName="transform" type="rotate" values="0 184 56; -74 184 56; 0 184 56" dur="2.2s" repeatCount="indefinite"/>
+          <line x1="184" y1="56" x2="198" y2="106" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round"/>
+          <rect x="191" y="104" width="14" height="7" rx="3" fill="${lime}"/>
         </g>
       </svg>`;
     }
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <circle cx="160" cy="46" r="9.5" fill="${headCol}"/>
-      <path d="M138 64 C138 60, 182 60, 182 64 L174 122 L146 122 Z" fill="${torsoCol}"/>
-      <circle cx="136" cy="66" r="8.5" fill="${lime}" class="muscle-glow"/>
-      <circle cx="184" cy="66" r="8.5" fill="${lime}" class="muscle-glow"/>
-      <g class="anim-push">
-        <polyline points="134,66 114,48 114,24" stroke="${limbCol}" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <polyline points="186,66 206,48 206,24" stroke="${limbCol}" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <rect x="102" y="18" width="24" height="7" rx="3" fill="${lime}"/>
-        <rect x="194" y="18" width="24" height="7" rx="3" fill="${lime}"/>
-      </g>
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <circle cx="160" cy="52" r="9.5" fill="${headCol}"/>
+      <path d="M138 70 C138 66, 182 66, 182 70 L174 132 L146 132 Z" fill="${torsoCol}"/>
+      <circle cx="135" cy="72" r="8.5" fill="${lime}" class="muscle-glow"/>
+      <circle cx="185" cy="72" r="8.5" fill="${lime}" class="muscle-glow"/>
+      <!-- Жимы гантелей/штанги над головой с работой локтей -->
+      <line x1="135" y1="72" x2="112" y2="78" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
+        <animate attributeName="x2" values="112;122;112" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="78;46;78" dur="2.3s" repeatCount="indefinite"/>
+      </line>
+      <line x1="185" y1="72" x2="208" y2="78" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
+        <animate attributeName="x2" values="208;198;208" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="78;46;78" dur="2.3s" repeatCount="indefinite"/>
+      </line>
+      <line x1="112" y1="78" x2="114" y2="52" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
+        <animate attributeName="x1" values="112;122;112" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="78;46;78" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="x2" values="114;126;114" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="52;20;52" dur="2.3s" repeatCount="indefinite"/>
+      </line>
+      <line x1="208" y1="78" x2="206" y2="52" stroke="${limbCol}" stroke-width="6" stroke-linecap="round">
+        <animate attributeName="x1" values="208;198;208" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="78;46;78" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="x2" values="206;194;206" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="52;20;52" dur="2.3s" repeatCount="indefinite"/>
+      </line>
     </svg>`;
   }
 
-  // 10. Бицепс / Трицепс
+  // 11. БИЦЕПС / ТРИЦЕПС (Изоляция рук)
   if (m === 'biceps' || m === 'triceps') {
     const isTri = m === 'triceps';
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <circle cx="132" cy="34" r="9.5" fill="${headCol}"/>
-      <line x1="132" y1="48" x2="132" y2="124" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round"/>
-      <line x1="136" y1="54" x2="146" y2="82" stroke="${limbCol}" stroke-width="8" stroke-linecap="round"/>
-      <ellipse cx="${isTri ? 137 : 144}" cy="68" rx="6" ry="11" fill="${lime}" class="muscle-glow"/>
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <circle cx="132" cy="36" r="9.5" fill="${headCol}"/>
+      <line x1="132" y1="50" x2="132" y2="132" stroke="${torsoCol}" stroke-width="13" stroke-linecap="round"/>
+      <line x1="136" y1="56" x2="146" y2="86" stroke="${limbCol}" stroke-width="8" stroke-linecap="round"/>
+      <ellipse cx="${isTri ? 136 : 145}" cy="70" rx="6.5" ry="12" fill="${lime}" class="muscle-glow"/>
       <g>
-        <animateTransform attributeName="transform" type="rotate" values="${isTri ? '-35 146 82; 35 146 82; -35 146 82' : '15 146 82; -55 146 82; 15 146 82'}" dur="2.1s" repeatCount="indefinite"/>
-        <line x1="146" y1="82" x2="192" y2="82" stroke="${limbCol}" stroke-width="7" stroke-linecap="round"/>
-        <rect x="188" y="72" width="10" height="20" rx="3" fill="${lime}"/>
+        <animateTransform attributeName="transform" type="rotate" values="${isTri ? '-38 146 86; 38 146 86; -38 146 86' : '18 146 86; -58 146 86; 18 146 86'}" dur="2.1s" repeatCount="indefinite"/>
+        <line x1="146" y1="86" x2="194" y2="86" stroke="${limbCol}" stroke-width="7" stroke-linecap="round"/>
+        <rect x="190" y="76" width="11" height="20" rx="3" fill="${lime}"/>
       </g>
     </svg>`;
   }
 
-  // 11. Ягодичный мостик
+  // 12. ЯГОДИЧНЫЙ МОСТИК (glutes)
   if (m === 'glutes' && (id.includes('thrust') || id.includes('bridge'))) {
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <line x1="20" y1="124" x2="300" y2="124" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-      <rect x="64" y="88" width="44" height="36" rx="6" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>
-      <line x1="210" y1="86" x2="226" y2="122" stroke="${limbCol}" stroke-width="9" stroke-linecap="round"/>
-      <g class="anim-thrust">
-        <polyline points="104,86 156,86 210,86" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-        <ellipse cx="156" cy="86" rx="16" ry="9" fill="${lime}" class="muscle-glow"/>
-        <circle cx="88" cy="78" r="9" fill="${headCol}"/>
-      </g>
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="20" y1="130" x2="300" y2="130" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      <rect x="64" y="92" width="44" height="38" rx="6" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>
+      <!-- Голень стоит вертикально от стопы (220,128) к колену (212,86) -->
+      <line x1="212" y1="86" x2="220" y2="128" stroke="${limbCol}" stroke-width="9" stroke-linecap="round"/>
+      <!-- Бедро и корпус двигаются в тазобедренном суставе (158, 86..112) -->
+      <line x1="104" y1="88" x2="158" y2="86" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round">
+        <animate attributeName="y2" values="86;112;86" dur="2.3s" repeatCount="indefinite"/>
+      </line>
+      <line x1="158" y1="86" x2="212" y2="86" stroke="${darkLimb}" stroke-width="11" stroke-linecap="round">
+        <animate attributeName="y1" values="86;112;86" dur="2.3s" repeatCount="indefinite"/>
+      </line>
+      <ellipse cx="158" cy="86" rx="15" ry="9" fill="${lime}" class="muscle-glow">
+        <animate attributeName="cy" values="86;112;86" dur="2.3s" repeatCount="indefinite"/>
+      </ellipse>
+      <circle cx="88" cy="80" r="9" fill="${headCol}"/>
     </svg>`;
   }
 
-  // 12. Бицепс бедра
+  // 13. БИЦЕПС БЕДРА (Румынская тяга и сгибания)
   if (m === 'hamstrings') {
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <line x1="40" y1="126" x2="280" y2="126" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-      <line x1="148" y1="82" x2="148" y2="124" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="40" y1="132" x2="280" y2="132" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      <line x1="146" y1="86" x2="146" y2="130" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
       <g>
-        <animateTransform attributeName="transform" type="rotate" values="0 148 82; 65 148 82; 0 148 82" dur="2.5s" repeatCount="indefinite"/>
-        <line x1="148" y1="82" x2="148" y2="38" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-        <circle cx="148" cy="24" r="9" fill="${headCol}"/>
-        <line x1="148" y1="48" x2="162" y2="82" stroke="${limbCol}" stroke-width="6" stroke-linecap="round"/>
-        <circle cx="164" cy="84" r="9" fill="#0f172a" stroke="${lime}" stroke-width="3"/>
+        <animateTransform attributeName="transform" type="rotate" values="0 146 86; 66 146 86; 0 146 86" dur="2.5s" repeatCount="indefinite"/>
+        <line x1="146" y1="86" x2="146" y2="40" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round"/>
+        <circle cx="146" cy="26" r="9" fill="${headCol}"/>
+        <line x1="146" y1="50" x2="162" y2="86" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round"/>
+        <circle cx="164" cy="88" r="9.5" fill="#0f172a" stroke="${lime}" stroke-width="3.5"/>
       </g>
     </svg>`;
   }
 
-  // 13. Икры
+  // 14. ИКРЫ
   if (m === 'calves') {
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <rect x="115" y="112" width="60" height="14" rx="3" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>
-      <g class="anim-calf">
-        <circle cx="160" cy="26" r="9" fill="${headCol}"/>
-        <line x1="160" y1="38" x2="160" y2="76" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-        <line x1="160" y1="76" x2="160" y2="108" stroke="${lime}" stroke-width="10" stroke-linecap="round" class="muscle-glow"/>
-        <line x1="160" y1="110" x2="176" y2="110" stroke="${limbCol}" stroke-width="6" stroke-linecap="round"/>
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <rect x="115" y="118" width="60" height="14" rx="3" fill="#1e293b" stroke="${equipCol}" stroke-width="2"/>
+      <g>
+        <animateTransform attributeName="transform" type="translate" values="0,0; 0,-12; 0,0" dur="1.9s" repeatCount="indefinite"/>
+        <circle cx="160" cy="28" r="9" fill="${headCol}"/>
+        <line x1="160" y1="40" x2="160" y2="80" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
+        <line x1="160" y1="80" x2="160" y2="114" stroke="${lime}" stroke-width="10" stroke-linecap="round" class="muscle-glow"/>
+        <line x1="160" y1="114" x2="176" y2="116" stroke="${limbCol}" stroke-width="6" stroke-linecap="round"/>
       </g>
     </svg>`;
   }
 
-  // 14. Стульчик у стены
+  // 15. СТАТИЧЕСКИЙ СТУЛЬЧИК У СТЕНЫ
   if (id.includes('wall_sit')) {
-    return `<svg viewBox="0 0 320 148" fill="none">
-      <line x1="115" y1="20" x2="115" y2="124" stroke="${equipCol}" stroke-width="4" stroke-linecap="round"/>
-      <line x1="115" y1="124" x2="240" y2="124" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="126" cy="42" r="9" fill="${headCol}"/>
-      <line x1="124" y1="54" x2="124" y2="86" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-      <line x1="124" y1="86" x2="168" y2="86" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
-      <line x1="168" y1="86" x2="168" y2="122" stroke="${limbCol}" stroke-width="9" stroke-linecap="round"/>
-      <text x="215" y="65" fill="${lime}" font-size="11" font-weight="800">УГОЛ 90°</text>
+    return `<svg viewBox="0 0 320 156" fill="none">
+      <line x1="115" y1="20" x2="115" y2="130" stroke="${equipCol}" stroke-width="4" stroke-linecap="round"/>
+      <line x1="115" y1="130" x2="240" y2="130" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="126" cy="44" r="9" fill="${headCol}"/>
+      <line x1="124" y1="56" x2="124" y2="90" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
+      <line x1="124" y1="90" x2="170" y2="90" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
+      <line x1="170" y1="90" x2="170" y2="128" stroke="${limbCol}" stroke-width="9" stroke-linecap="round"/>
+      <text x="218" y="68" fill="${lime}" font-size="11" font-weight="800">УГОЛ 90°</text>
     </svg>`;
   }
 
-  // 15. Квадрицепсы (Приседания — стопы жёстко на полу!)
-  return `<svg viewBox="0 0 320 148" fill="none">
-    <line x1="60" y1="126" x2="260" y2="126" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-    <!-- Голень от колена (184,94 -> 192,108) к стопе на полу (174,124) -->
-    <line x1="184" y1="94" x2="174" y2="124" stroke="${limbCol}" stroke-width="9" stroke-linecap="round">
+  // 16. ПРИСЕДАНИЯ / ВЫПАДЫ (Квадрицепсы + Ягодицы)
+  return `<svg viewBox="0 0 320 156" fill="none">
+    <line x1="60" y1="132" x2="260" y2="132" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
+    <line x1="184" y1="98" x2="174" y2="130" stroke="${limbCol}" stroke-width="9" stroke-linecap="round">
       <animate attributeName="x1" values="184;194;184" dur="2.5s" repeatCount="indefinite"/>
-      <animate attributeName="y1" values="94;104;94" dur="2.5s" repeatCount="indefinite"/>
+      <animate attributeName="y1" values="98;108;98" dur="2.5s" repeatCount="indefinite"/>
     </line>
-    <!-- Бедро от таза (144,76 -> 136,104) к колену -->
-    <line x1="144" y1="76" x2="184" y2="94" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow">
+    <line x1="144" y1="80" x2="184" y2="98" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow">
       <animate attributeName="x1" values="144;134;144" dur="2.5s" repeatCount="indefinite"/>
-      <animate attributeName="y1" values="76;104;76" dur="2.5s" repeatCount="indefinite"/>
+      <animate attributeName="y1" values="80;108;80" dur="2.5s" repeatCount="indefinite"/>
       <animate attributeName="x2" values="184;194;184" dur="2.5s" repeatCount="indefinite"/>
-      <animate attributeName="y2" values="94;104;94" dur="2.5s" repeatCount="indefinite"/>
+      <animate attributeName="y2" values="98;108;98" dur="2.5s" repeatCount="indefinite"/>
     </line>
-    <!-- Корпус и голова -->
     <g>
       <animateTransform attributeName="transform" type="translate" values="0,0; -10,28; 0,0" dur="2.5s" repeatCount="indefinite"/>
-      <circle cx="165" cy="24" r="9.5" fill="${headCol}"/>
-      <line x1="162" y1="36" x2="144" y2="76" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
-      <circle cx="158" cy="38" r="11" fill="#0f172a" stroke="${lime}" stroke-width="3"/>
+      <circle cx="165" cy="28" r="9.5" fill="${headCol}"/>
+      <line x1="162" y1="40" x2="144" y2="80" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
+      <circle cx="158" cy="42" r="11" fill="#0f172a" stroke="${lime}" stroke-width="3.5"/>
     </g>
   </svg>`;
 }
@@ -1071,7 +1117,7 @@ function openExerciseModal(idx) {
       ${APP_STATE.muscle_names[ex.muscle] || ex.muscle} • Биомеханика и разбор
     </div>
     <div style="font-size:18px;font-weight:900;margin-bottom:12px;">${ex.name}</div>
-    <div class="demo-stage" style="border-radius:16px;border:1px solid var(--border);margin-bottom:14px;height:165px;">
+    <div class="demo-stage" style="border-radius:16px;border:1px solid var(--border);margin-bottom:14px;height:175px;">
       ${getBiomechanicsSVG(ex)}
     </div>
     <div class="cue-box" style="margin-bottom:12px;">
@@ -1288,13 +1334,14 @@ function renderWorkoutTab() {
     const hasWeightInput = (wMode === 'weighted');
     const wLabel = !hasWeightInput ? 'Свой вес' : (ex.target_weight > 0 ? `${ex.target_weight} кг` : 'Подбор веса');
     const savedReps = ex.logged_reps || Array(ex.sets).fill(ex.target_reps);
+    const colsCount = Math.min(6, Math.max(2, ex.sets));
 
     let setPillsHtml = '';
     for (let s = 0; s < ex.sets; s++) {
       const val = savedReps[s] !== undefined ? savedReps[s] : ex.target_reps;
       setPillsHtml += `
         <div class="set-pill">
-          <div class="set-num">Подх. ${s + 1}</div>
+          <div class="set-num">${ex.sets >= 5 ? 'П.' + (s + 1) : 'Подх. ' + (s + 1)}</div>
           <input type="number" class="set-val-input set-inp-${idx}" value="${val}">
         </div>
       `;
@@ -1337,7 +1384,7 @@ function renderWorkoutTab() {
           <div class="meta-strip">
             <span class="meta-item">План: <b>${ex.sets} × ${ex.target_reps} ${unit}</b> (${ex.rep_min}–${ex.rep_max})</span>
             <span class="meta-item">Нагрузка: <b>${wLabel}</b></span>
-            <span class="meta-item meta-rest" onclick="startRestTimer(${ex.rest_sec})">⏱ ${ex.rest_sec}с</span>
+            <span class="meta-item meta-rest" onclick="startRestTimer(${ex.rest_sec})">⏱ Отдых ${ex.rest_sec}с</span>
             ${addWeightChip}
             ${platesChip}
           </div>
@@ -1353,17 +1400,17 @@ function renderWorkoutTab() {
                 <button class="mini-pill-btn" onclick="adjustAllSets(${idx}, 1)">+1 всем</button>
               </div>
             </div>
-            <div class="sets-grid">${setPillsHtml}</div>
+            <div class="sets-grid" style="--sets-cols:${colsCount};">${setPillsHtml}</div>
 
             <div class="btn-row">
-              <button class="btn btn-lime" style="flex:2;" onclick="submitExercise(${idx}, ${!hasWeightInput}, ${ex.rest_sec})">
-                ${ex.logged_today ? '🔄 Обновить результат' : '✅ Записать упражнение'}
+              <button class="btn btn-lime" style="flex:1.8;" onclick="submitExercise(${idx}, ${!hasWeightInput}, ${ex.rest_sec})">
+                ${ex.logged_today ? '🔄 Обновить' : '✅ Записать'}
               </button>
               <button class="btn" style="flex:1;" onclick="swapExercise(${idx})">
                 🔄 Замена
               </button>
-              <button class="btn" onclick="startRestTimer(${ex.rest_sec})" title="Таймер отдыха">
-                ⏱
+              <button class="btn btn-rest" style="flex:1;" onclick="startRestTimer(${ex.rest_sec})">
+                ⏱ ${ex.rest_sec}с
               </button>
             </div>
           </div>
@@ -1525,8 +1572,9 @@ function renderProgressTab() {
     itemsHtml = `<div style="font-size:13px;color:var(--text-dim);">Пока 0 записанных упражнений. Отметь подходы во вкладке «Тренировка», чтобы запустить двойную прогрессию.</div>`;
   } else {
     prog.items.forEach(item => {
-      const wTxt = item.curr_w > 0 ? `${item.curr_w} кг` : 'Свой вес';
-      const subTxt = item.curr_w > 0 ? `Старт: ${item.init_w} кг • ~1ПМ: ${item.est_1rm} кг` : 'Прогрессия по повторениям';
+      const unit = item.is_timed ? 'сек' : 'повт.';
+      const wTxt = item.curr_w > 0 ? `${item.curr_w} кг` : `Цель: ${item.target_reps || ''} ${unit}`;
+      const subTxt = item.curr_w > 0 ? `Старт: ${item.init_w} кг • ~1ПМ: ${item.est_1rm} кг` : 'Свой вес • прогрессия повторений';
       itemsHtml += `
         <div style="padding:11px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <div>
@@ -1725,7 +1773,7 @@ function renderProfileTab(isFirstRun) {
             <option value="Asia/Krasnoyarsk" ${p.timezone==='Asia/Krasnoyarsk'?'selected':''}>МСК+4</option>
             <option value="Asia/Irkutsk" ${p.timezone==='Asia/Irkutsk'?'selected':''}>МСК+5</option>
             <option value="Asia/Vladivostok" ${p.timezone==='Asia/Vladivostok'?'selected':''}>МСК+7</option>
-          </select>
+                    </select>
         </div>
       </div>
 
