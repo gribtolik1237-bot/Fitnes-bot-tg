@@ -1,6 +1,7 @@
 # main.py
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -217,7 +218,7 @@ def build_personal_motivation(profile: dict | None) -> str:
         total_w = conn.execute("SELECT COUNT(*) AS cnt FROM workout_logs").fetchone()["cnt"]
         deload_cnt = conn.execute("SELECT COUNT(*) AS cnt FROM exercise_progress WHERE fail_streak >= 1").fetchone()["cnt"]
 
-    base_msg = random.choice(pack["templates"]).format(story=story)
+    base_msg = random.choice(pack["templates"]).format(story=html.escape(story))
 
     if deload_cnt > 0:
         context_line = f"⚡ <i>Внимание: в {deload_cnt} упр. был недобор повторений — сегодня закрываем долг на 100%!</i>"
@@ -790,7 +791,7 @@ def format_profile_summary(profile: dict) -> str:
     nut = calculate_nutrition(profile)
     story = (profile.get("personal_story") or "").strip()
     arch_lbl = profile.get("motivation_archetype_label", "")
-    story_line = f"• Личный триггер: <i>«{story}»</i> ({arch_lbl})\n" if story else ""
+    story_line = f"• Личный триггер: <i>«{html.escape(story)}»</i> ({arch_lbl})\n" if story else ""
 
     return (
         f"📋 <b>ТВОЙ ПРОФИЛЬ АТЛЕТА</b>\n"
