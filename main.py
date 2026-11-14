@@ -22,6 +22,7 @@ from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from data_bank import (
+    ADAPTIVE_MOTIVATION_PACKS,
     EQUIPMENT_NAMES,
     EVENING_SHAME_QUOTES,
     EXCUSE_RESPONSES,
@@ -83,6 +84,7 @@ def init_db() -> None:
                 duration INTEGER NOT NULL,
                 injuries TEXT NOT NULL,
                 timezone TEXT NOT NULL DEFAULT 'Europe/Moscow',
+                personal_story TEXT NOT NULL DEFAULT '',
                 workout_counter INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
@@ -117,6 +119,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE user_profile ADD COLUMN initial_body_weight REAL NOT NULL DEFAULT 0.0;")
         if "timezone" not in u_cols:
             conn.execute("ALTER TABLE user_profile ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Europe/Moscow';")
+        if "personal_story" not in u_cols:
+            conn.execute("ALTER TABLE user_profile ADD COLUMN personal_story TEXT NOT NULL DEFAULT '';")
 
         p_cols = {r["name"] for r in conn.execute("PRAGMA table_info(exercise_progress)").fetchall()}
         if "fail_streak" not in p_cols:
@@ -158,6 +162,73 @@ def now_iso(profile: dict | None = None) -> str:
     return datetime.now(get_user_tz(profile)).isoformat()
 
 
+# ==================== АДАПТИВНЫЙ АНАЛИЗАТОР ТЕКСТА И МОТИВАЦИИ ====================
+
+def detect_motivation_archetype(story: str) -> str:
+    s = story.lower()
+
+    heartbreak_kw = (
+        "бывш", "девушк", "жен", "бросил", "ушла", "ушел", "расстал", "разбил",
+        "предал", "измен", "люб", "отношен", "потерял ее", "потерять ее", "пожалел", "кусала локти",
+    )
+    prove_kw = (
+        "доказат", "утереть", "нос", "не вер", "смеял", "сомневал", "враг", "соперник",
+        "конкурент", "завист", "говорил", "слабак", "унизил", "лучше всех", "переплюн", "заткн",
+    )
+    duty_kw = (
+        "семь", "мать", "мам", "отц", "пап", "родит", "сын", "доч", "дет", "брат",
+        "защит", "опор", "не подвест", "гордил", "пример", "близк", "родн",
+    )
+    self_kw = (
+        "лен", "жир", "пуз", "дрыщ", "худой", "слаб", "комплекс", "стыд", "зеркал",
+        "устал быть", "ненавиж", "дисциплин", "характер", "для себя", "самоуважен", "уверенн",
+    )
+
+    scores = {
+        "heartbreak_revenge": sum(2 for kw in heartbreak_kw if kw in s),
+        "prove_them_wrong": sum(2 for kw in prove_kw if kw in s),
+        "protector_duty": sum(2 for kw in duty_kw if kw in s),
+        "self_conquest": sum(2 for kw in self_kw if kw in s),
+    }
+
+    best_key, best_score = max(scores.items(), key=lambda x: x[1])
+    if best_score > 0:
+        return best_key
+    return "hardcore_default"
+
+
+def build_personal_motivation(profile: dict | None) -> str:
+    story = (profile.get("personal_story") or "").strip() if profile else ""
+    goal_txt = GOAL_NAMES.get(profile["goal"], "Мощная форма") if profile else "Мощная форма"
+    muscles_txt = ", ".join(MUSCLE_NAMES.get(m, m) for m in profile.get("priority_muscles", [])) if profile else ""
+
+    if not story:
+        return (
+            f"🔥 <b>ТВОЯ ЦЕЛЬ — {goal_txt.upper()}!</b>\n"
+            f"Акцент: <b>{muscles_txt}</b>.\n\n"
+            f"{random.choice(MORNING_QUOTES)}"
+        )
+
+    archetype = detect_motivation_archetype(story)
+    pack = ADAPTIVE_MOTIVATION_PACKS.get(archetype, ADAPTIVE_MOTIVATION_PACKS["hardcore_default"])
+
+    # Подбираем также контекст текущего прогресса, если есть закрытые тренировки
+    with get_conn() as conn:
+        total_w = conn.execute("SELECT COUNT(*) AS cnt FROM workout_logs").fetchone()["cnt"]
+        deload_cnt = conn.execute("SELECT COUNT(*) AS cnt FROM exercise_progress WHERE fail_streak >= 1").fetchone()["cnt"]
+
+    base_msg = random.choice(pack["templates"]).format(story=story)
+
+    if deload_cnt > 0:
+        context_line = f"⚡ <i>Внимание: в {deload_cnt} упр. был недобор повторений — сегодня закрываем долг на 100%!</i>"
+    elif total_w > 0:
+        context_line = f"🏆 <i>За плечами уже {total_w} закрытых тренировок — не смей сбавлять обороты!</i>"
+    else:
+        context_line = f"📌 <i>Цель: {goal_txt} • Главный удар на: {muscles_txt}.</i>"
+
+    return f"🧠 <b>Режим психологии: {pack['label']}</b>\n\n{base_msg}\n\n{context_line}"
+
+
 def calculate_nutrition(profile: dict) -> dict:
     w = float(profile["weight"])
     h = int(profile["height"])
@@ -194,6 +265,7 @@ def save_profile(user_id: int, data: dict) -> None:
     init_bw = existing["initial_body_weight"] if (existing and existing.get("initial_body_weight", 0) > 0) else w
     tz = data.get("timezone", DEFAULT_TIMEZONE)
     eq_list = normalize_equipment(data.get("equipment"))
+    story = str(data.get("personal_story", existing.get("personal_story", "") if existing else "")).strip()
 
     with get_conn() as conn:
         conn.execute(
@@ -201,8 +273,8 @@ def save_profile(user_id: int, data: dict) -> None:
             INSERT INTO user_profile (
                 user_id, gender, age, height, weight, initial_body_weight, goal,
                 priority_muscles, level, equipment, training_days,
-                duration, injuries, timezone, workout_counter, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration, injuries, timezone, personal_story, workout_counter, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 gender=excluded.gender,
                 age=excluded.age,
@@ -216,6 +288,7 @@ def save_profile(user_id: int, data: dict) -> None:
                 duration=excluded.duration,
                 injuries=excluded.injuries,
                 timezone=excluded.timezone,
+                personal_story=excluded.personal_story,
                 updated_at=excluded.updated_at
             """,
             (
@@ -224,7 +297,7 @@ def save_profile(user_id: int, data: dict) -> None:
                 data["level"], json.dumps(eq_list, ensure_ascii=False),
                 json.dumps(sorted(data["training_days"])),
                 int(data["duration"]), json.dumps(data["injuries"], ensure_ascii=False),
-                tz, counter, now_iso({"timezone": tz}),
+                tz, story, counter, now_iso({"timezone": tz}),
             ),
         )
         conn.execute("DELETE FROM active_workouts WHERE user_id = ?", (user_id,))
@@ -255,6 +328,11 @@ def get_profile(user_id: int) -> dict | None:
     d["training_days"] = json.loads(d["training_days"])
     d["injuries"] = json.loads(d["injuries"])
     d["equipment"] = normalize_equipment(d["equipment"])
+    d["personal_story"] = d.get("personal_story") or ""
+    d["motivation_archetype_label"] = (
+        ADAPTIVE_MOTIVATION_PACKS[detect_motivation_archetype(d["personal_story"])]["label"]
+        if d["personal_story"].strip() else ""
+    )
     return d
 
 
@@ -292,23 +370,24 @@ def determine_split(profile: dict) -> tuple[str, list[dict]]:
     days_count = len(profile["training_days"])
 
     if days_count <= 3:
-        return f"Full Body (Все тело, {days_count} дн./нед.)", [
-            {"day_title": "Full Body — День А (Акцент на базовый жим и присед)", "muscles": ["quads", "chest", "back", "shoulders", "biceps", "triceps", "abs"]},
-            {"day_title": "Full Body — День Б (Акцент на тяги и заднюю цепь)", "muscles": ["hamstrings", "glutes", "back", "chest", "shoulders", "calves", "abs"]},
+        return f"Full Body Pro (Все тело, {days_count} дн./нед.)", [
+            {"day_title": "Full Body — День А (Тяжелый базовый жим, присед и тяга)", "muscles": ["quads", "chest", "back", "shoulders", "biceps", "triceps", "abs"]},
+            {"day_title": "Full Body — День Б (Задняя цепь, верх груди и ширина спины)", "muscles": ["hamstrings", "glutes", "back", "chest", "shoulders", "calves", "abs"]},
+            {"day_title": "Full Body — День В (Гипертрофия дельт, рук и функциональный кор)", "muscles": ["chest", "back", "quads", "shoulders", "triceps", "biceps", "abs"]},
         ]
 
     if days_count == 4:
-        return "Верх / Низ (Upper / Lower, 4 дн./нед.)", [
-            {"day_title": "Верх А (Силовой акцент: Грудь + Спина + Плечи)", "muscles": ["chest", "back", "shoulders", "biceps", "triceps"]},
-            {"day_title": "Низ А (Квадрицепсы + Бицепс бедра + Икры + Пресс)", "muscles": ["quads", "hamstrings", "glutes", "calves", "abs"]},
-            {"day_title": "Верх Б (Объемный акцент: Спина + Грудь + Руки)", "muscles": ["back", "chest", "shoulders", "triceps", "biceps"]},
-            {"day_title": "Низ Б (Ягодицы + Задняя цепь + Квадрицепсы + Пресс)", "muscles": ["glutes", "hamstrings", "quads", "calves", "abs"]},
+        return "Верх / Низ Pro (Upper / Lower, 4 дн./нед.)", [
+            {"day_title": "Верх А (Силовой акцент: Грудь + Широчайшие + Передняя/средняя дельта)", "muscles": ["chest", "back", "shoulders", "biceps", "triceps"]},
+            {"day_title": "Низ А (Силовой присед: Квадрицепсы + Бицепс бедра + Икры + Пресс)", "muscles": ["quads", "hamstrings", "glutes", "calves", "abs"]},
+            {"day_title": "Верх Б (Гипертрофия и детализация: Толщина спины + Верх груди + Руки)", "muscles": ["back", "chest", "shoulders", "triceps", "biceps"]},
+            {"day_title": "Низ Б (Тазово-доминантный: Ягодицы + Задняя цепь + Квадрицепсы + Кор)", "muscles": ["glutes", "hamstrings", "quads", "calves", "abs"]},
         ]
 
-    return f"Тяни / Толкай / Ноги (Push / Pull / Legs, {days_count} дн./нед.)", [
-        {"day_title": "Толкай (Push: Грудь + Плечи + Трицепс)", "muscles": ["chest", "shoulders", "triceps", "abs"]},
-        {"day_title": "Тяни (Pull: Спина + Задняя дельта + Бицепс)", "muscles": ["back", "biceps", "shoulders"]},
-        {"day_title": "Ноги (Legs: Квадрицепсы + Бицепс бедра + Ягодицы + Икры)", "muscles": ["quads", "hamstrings", "glutes", "calves", "abs"]},
+    return f"Тяни / Толкай / Ноги Pro (Push / Pull / Legs, {days_count} дн./нед.)", [
+        {"day_title": "Толкай (Push: Грудь + Передняя/Средняя дельта + Трицепс)", "muscles": ["chest", "shoulders", "triceps", "abs"]},
+        {"day_title": "Тяни (Pull: Широчайшие + Верх спины + Задняя дельта + Бицепс)", "muscles": ["back", "biceps", "shoulders"]},
+        {"day_title": "Ноги (Legs: Квадрицепсы + Бицепс бедра + Ягодицы + Икры + Пресс)", "muscles": ["quads", "hamstrings", "glutes", "calves", "abs"]},
     ]
 
 
@@ -336,7 +415,7 @@ def get_exercise_targets(ex: dict, goal: str, level: str = "intermediate") -> tu
     if not is_timed:
         if goal == "strength":
             rep_min = max(4, rep_min - 2)
-            rep_max = max(6, rep_max - 4)
+            rep_max = max(6, rep_max - 3)
         elif goal == "cut":
             rep_min = rep_min + 2
             rep_max = rep_max + 3
@@ -363,9 +442,31 @@ def get_exercise_targets(ex: dict, goal: str, level: str = "intermediate") -> tu
     return 0.0, rep_min, rep_min, rep_max
 
 
+def get_coaching_prescription(ex: dict, is_priority: bool, goal: str) -> dict:
+    is_comp = ex["is_compound"]
+    is_timed = ex.get("is_timed", False)
+    if is_timed:
+        return {
+            "rir": "До жжения (RPE 9)",
+            "tempo": "Статика без провисания",
+            "role": "Изометрическая стабилизация",
+        }
+    if is_comp:
+        rir = "RIR 1–2 (1–2 повт. в запасе)" if goal != "strength" else "RIR 1 (тяжелый силовой сет)"
+        tempo = "2–1–1 (2с негатив, 1с пауза)"
+        role = "🎯 Ударная база (главный стимул роста)" if is_priority else "Базовое многосуставное движение"
+    else:
+        rir = "RIR 0–1 (почти до отказа)"
+        tempo = "2–0–1 + 1с пиковое сжатие"
+        role = "🎯 Прицельная гипертрофия" if is_priority else "Изолирующая добивка и памп"
+    return {"rir": rir, "tempo": tempo, "role": role}
+
+
 def build_regular_workout(profile: dict) -> dict:
     split_name, split_days = determine_split(profile)
-    day_idx = profile["workout_counter"] % len(split_days)
+    w_counter = int(profile.get("workout_counter", 0))
+    day_idx = w_counter % len(split_days)
+    rotation_cycle = w_counter // len(split_days)
     day_template = split_days[day_idx]
 
     priority = set(profile["priority_muscles"])
@@ -373,59 +474,105 @@ def build_regular_workout(profile: dict) -> dict:
     level = profile["level"]
     max_seconds = profile["duration"] * 60
 
-    ordered_muscles = sorted(day_template["muscles"], key=lambda m: (0 if m in priority else 1))
-
     if level == "beginner":
         base_sets = 3
-        diff_rest_mult = 1.15
+        diff_rest_mult = 1.10
     elif level == "advanced":
         base_sets = 4
-        diff_rest_mult = 0.85
+        diff_rest_mult = 0.90
     else:
         base_sets = 3
         diff_rest_mult = 1.0
 
-    goal_rest_mult = 1.25 if goal == "strength" else (0.8 if goal == "cut" else 1.0)
+    goal_rest_mult = 1.20 if goal == "strength" else (0.80 if goal == "cut" else 1.0)
     rest_mult = goal_rest_mult * diff_rest_mult
 
+    big_muscles = {"chest", "back", "quads", "hamstrings", "glutes"}
+    ordered_muscles = sorted(
+        day_template["muscles"],
+        key=lambda m: (
+            0 if (m in priority and m in big_muscles) else (
+                1 if m in big_muscles else (
+                    2 if m in priority else (4 if m == "abs" else 3)
+                )
+            )
+        ),
+    )
+
     selected_exercises = []
-    total_time = 180
+    used_ids = set()
+    total_time = 240
 
     for muscle in ordered_muscles:
         candidates = filter_exercises(profile, muscle)
-        candidates.sort(key=lambda x: (0 if x["is_compound"] else 1))
+        compounds = [c for c in candidates if c["is_compound"]]
+        isolations = [c for c in candidates if not c["is_compound"]]
 
         is_priority = muscle in priority
-        num_ex_for_muscle = 2 if (is_priority and len(candidates) >= 2 and profile["duration"] >= 45) else 1
+        want_two = is_priority and len(candidates) >= 2 and profile["duration"] >= 45 and muscle in big_muscles
 
-        for idx_ex in range(num_ex_for_muscle):
-            ex = candidates[idx_ex % len(candidates)]
-            sets = base_sets + (1 if is_priority else 0)
-            if is_priority and num_ex_for_muscle == 1 and level == "advanced":
-                sets += 1
-            sets = min(5, sets)
+        chosen_for_muscle = []
+        if want_two:
+            first_pool = compounds if compounds else candidates
+            ex1 = first_pool[(rotation_cycle + day_idx) % len(first_pool)]
+            chosen_for_muscle.append(ex1)
+            second_pool = [c for c in (isolations if isolations else candidates) if c["id"] != ex1["id"]]
+            if second_pool:
+                ex2 = second_pool[(rotation_cycle + day_idx) % len(second_pool)]
+                chosen_for_muscle.append(ex2)
+        else:
+            pool = compounds if (compounds and muscle in big_muscles) else candidates
+            ex1 = pool[(rotation_cycle + day_idx) % len(pool)]
+            chosen_for_muscle.append(ex1)
+
+        for idx_in_m, ex in enumerate(chosen_for_muscle):
+            if ex["id"] in used_ids:
+                continue
+
+            sets = base_sets + (1 if (is_priority and idx_in_m == 0) else 0)
+            sets = min(4 if level != "advanced" else 5, sets)
 
             rest_sec = max(30, int(round((ex["rest_sec"] * rest_mult) / 5.0) * 5))
-            est_ex_time = sets * (40 + rest_sec) + 60
+            est_ex_time = sets * (40 + rest_sec) + 50
 
-            if total_time + est_ex_time > max_seconds and len(selected_exercises) >= 3:
+            if total_time + est_ex_time > max_seconds and len(selected_exercises) >= 4:
                 continue
 
             weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal, level)
+            rx = get_coaching_prescription(ex, is_priority, goal)
+            used_ids.add(ex["id"])
             selected_exercises.append({
-                "id": ex["id"], "name": ex["name"], "muscle": muscle,
-                "is_priority": is_priority, "is_compound": ex["is_compound"],
-                "is_timed": ex.get("is_timed", False), "sets": sets,
-                "target_weight": weight, "target_reps": t_reps,
-                "rep_min": r_min, "rep_max": r_max, "rest_sec": rest_sec, "cues": ex["cues"],
+                "id": ex["id"],
+                "name": ex["name"],
+                "muscle": muscle,
+                "is_priority": is_priority,
+                "is_compound": ex["is_compound"],
+                "is_timed": ex.get("is_timed", False),
+                "sets": sets,
+                "target_weight": weight,
+                "target_reps": t_reps,
+                "rep_min": r_min,
+                "rep_max": r_max,
+                "rest_sec": rest_sec,
+                "cues": ex["cues"],
+                "rir": rx["rir"],
+                "tempo": rx["tempo"],
+                "role": rx["role"],
             })
             total_time += est_ex_time
+
+    selected_exercises.sort(
+        key=lambda x: (
+            2 if x["muscle"] == "abs" else (0 if x["is_compound"] else 1),
+            0 if x["is_priority"] else 1,
+        )
+    )
 
     return {
         "workout_type": "regular",
         "split_name": split_name,
         "day_title": day_template["day_title"],
-        "est_minutes": max(20, round(total_time / 60)),
+        "est_minutes": max(25, round(total_time / 60)),
         "exercises": selected_exercises,
     }
 
@@ -442,8 +589,8 @@ def build_express_workout(profile: dict) -> dict:
         if len(chosen_muscles) == 4:
             break
 
-    sets_count = 2 if level == "beginner" else (4 if level == "advanced" else 3)
-    rest_val = 60 if level == "beginner" else (30 if level == "advanced" else 45)
+    sets_count = 3 if level != "beginner" else 2
+    rest_val = 45 if level != "beginner" else 60
 
     exercises = []
     used_ids = set()
@@ -454,19 +601,31 @@ def build_express_workout(profile: dict) -> dict:
         used_ids.add(ex["id"])
 
         weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal, level)
-        superset_label = "Суперсет 1" if i < 2 else "Суперсет 2"
+        rx = get_coaching_prescription(ex, muscle in priority, goal)
+        superset_label = "Суперсет A" if i < 2 else "Суперсет B"
         exercises.append({
-            "id": ex["id"], "name": f"[{superset_label}] {ex['name']}", "muscle": muscle,
-            "is_priority": muscle in priority, "is_compound": ex["is_compound"],
-            "is_timed": ex.get("is_timed", False), "sets": sets_count,
-            "target_weight": weight, "target_reps": t_reps,
-            "rep_min": r_min, "rep_max": r_max, "rest_sec": rest_val, "cues": ex["cues"],
+            "id": ex["id"],
+            "name": f"[{superset_label}] {ex['name']}",
+            "muscle": muscle,
+            "is_priority": muscle in priority,
+            "is_compound": ex["is_compound"],
+            "is_timed": ex.get("is_timed", False),
+            "sets": sets_count,
+            "target_weight": weight,
+            "target_reps": t_reps,
+            "rep_min": r_min,
+            "rep_max": r_max,
+            "rest_sec": rest_val,
+            "cues": ex["cues"],
+            "rir": rx["rir"],
+            "tempo": rx["tempo"],
+            "role": "⚡ Интенсивный суперсет без паузы",
         })
 
     return {
         "workout_type": "express",
-        "split_name": "Экспресс-протокол (Суперсеты без пауз)",
-        "day_title": "Жесткий 20-минутный удар с акцентом на целевые мышцы",
+        "split_name": "Экспресс-протокол (Антагонистические суперсеты)",
+        "day_title": "Высокоплотный 20-минутный блок на целевые мышцы",
         "est_minutes": 20,
         "exercises": exercises,
     }
@@ -510,8 +669,9 @@ def swap_exercise_in_plan(user_id: int, ex_index: int) -> tuple[bool, str, dict 
 
     new_ex = random.choice(candidates)
     weight, t_reps, r_min, r_max = get_exercise_targets(new_ex, profile["goal"], profile["level"])
+    rx = get_coaching_prescription(new_ex, old_ex["is_priority"], profile["goal"])
 
-    prefix_match = re.match(r"^(\[Суперсет \d+\]\s*)", old_ex["name"])
+    prefix_match = re.match(r"^(\[Суперсет [^\]]+\]\s*)", old_ex["name"])
     prefix = prefix_match.group(1) if prefix_match else ""
 
     exercises[ex_index] = {
@@ -528,6 +688,9 @@ def swap_exercise_in_plan(user_id: int, ex_index: int) -> tuple[bool, str, dict 
         "rep_max": r_max,
         "rest_sec": old_ex["rest_sec"],
         "cues": new_ex["cues"],
+        "rir": rx["rir"],
+        "tempo": rx["tempo"],
+        "role": rx["role"],
     }
 
     with get_conn() as conn:
@@ -562,13 +725,13 @@ def apply_double_progression(ex_item: dict, logged_weight: float, logged_reps: l
                 next_weight = round((logged_weight + step) * 2) / 2
                 next_reps = rep_min
                 msg = (
-                    f"🔥 <b>ДВОЙНАЯ ПРОГРЕССИЯ!</b> Все подходы закрыты на максимум ({rep_max} {unit}).\n"
-                    f"Вес повышен: <b>{logged_weight:g} кг → {next_weight:g} кг</b> (новая цель: {next_reps} {unit})."
+                    f"🔥 <b>ДВОЙНАЯ ПРОГРЕССИЯ!</b> Все подходы закрыты на верхнюю границу ({rep_max} {unit}).\n"
+                    f"Рабочий вес повышен: <b>{logged_weight:g} кг → {next_weight:g} кг</b> (новая цель: {next_reps} {unit})."
                 )
             else:
                 next_weight = 0.0
                 next_reps = max(logged_reps) + (5 if is_timed else 1)
-                msg = f"🔥 <b>ПРОГРЕСС В СВОЕМ ВЕСЕ!</b> Новая планка: <b>{next_reps} {unit}</b>!"
+                msg = f"🔥 <b>ПРОГРЕСС В СВОЕМ ВЕСЕ!</b> Новая планка на следующую тренировку: <b>{next_reps} {unit}</b>!"
         elif missed_floor and logged_weight > 0:
             fail_streak += 1
             if fail_streak >= 2:
@@ -577,14 +740,14 @@ def apply_double_progression(ex_item: dict, logged_weight: float, logged_reps: l
                 fail_streak = 0
                 msg = (
                     f"⚠️ <b>АВТО-РАЗГРУЗКА (DELOAD):</b> 2 тренировки подряд ниже минимума ({rep_min} {unit}).\n"
-                    f"Чтобы пробить плато, рабочий вес снижен на 10%: <b>{logged_weight:g} кг → {next_weight:g} кг</b>."
+                    f"Снижаем вес на 10% для суперкомпенсации: <b>{logged_weight:g} кг → {next_weight:g} кг</b>."
                 )
             else:
                 next_weight = logged_weight
                 next_reps = rep_min
                 msg = (
-                    f"⚡ Не добрал минимум ({rep_min} {unit}). Вес <b>{next_weight:g} кг</b> оставляем — "
-                    f"на следующей тренировке обязан добить минимум во всех подходах!"
+                    f"⚡ Не добрал минимум ({rep_min} {unit}). Вес <b>{next_weight:g} кг</b> сохраняем — "
+                    f"в следующий раз обязан закрыть {rep_min} {unit} во всех подходах!"
                 )
         else:
             fail_streak = 0
@@ -625,6 +788,9 @@ def format_profile_summary(profile: dict) -> str:
     tz_label = TIMEZONE_LABELS.get(profile.get("timezone", DEFAULT_TIMEZONE), profile.get("timezone", DEFAULT_TIMEZONE))
     split_name, _ = determine_split(profile)
     nut = calculate_nutrition(profile)
+    story = (profile.get("personal_story") or "").strip()
+    arch_lbl = profile.get("motivation_archetype_label", "")
+    story_line = f"• Личный триггер: <i>«{story}»</i> ({arch_lbl})\n" if story else ""
 
     return (
         f"📋 <b>ТВОЙ ПРОФИЛЬ АТЛЕТА</b>\n"
@@ -634,6 +800,7 @@ def format_profile_summary(profile: dict) -> str:
         f"• Сложность: {LEVEL_NAMES.get(profile['level'], profile['level'])} | Инвентарь: {equip_str}\n"
         f"• График: {days_str} (~{profile['duration']} мин) | Пояс: {tz_label}\n"
         f"• Ограничения/травмы: {injuries_str}\n"
+        f"{story_line}"
         f"• Подобранный сплит: <b>{split_name}</b>\n\n"
         f"🥩 <b>СУТОЧНАЯ НОРМА КБЖУ ПОД ЦЕЛЬ:</b>\n"
         f"<b>{nut['kcal']} ккал</b> | Белки: <b>{nut['protein']}г</b> | Жиры: <b>{nut['fat']}г</b> | Углеводы: <b>{nut['carbs']}г</b>"
@@ -649,17 +816,20 @@ def format_workout_plan(plan: dict) -> str:
     if plan["workout_type"] == "express":
         lines.append(
             "⚡ <b>РЕЖИМ СУПЕРСЕТОВ:</b> Выполняй упражнения внутри одного суперсета подряд без отдыха, "
-            "после пары упражнений отдых 45 сек. 3 круга на каждый суперсет.\n"
+            "после пары упражнений отдых 45 сек.\n"
         )
 
     for idx, ex in enumerate(plan["exercises"], start=1):
-        star = "🎯 [ПРИОРИТЕТ] " if ex["is_priority"] else ""
-        weight_txt = f"{ex['target_weight']:g} кг" if ex["target_weight"] > 0 else "Свой вес / подбор"
+        star = "🎯 [АКЦЕНТ] " if ex["is_priority"] else ""
+        weight_txt = f"{ex['target_weight']:g} кг" if ex["target_weight"] > 0 else "Свой вес"
         unit = "сек" if ex.get("is_timed") else "повт."
+        rir_txt = ex.get("rir", "RIR 1–2")
+        tempo_txt = ex.get("tempo", "2–1–1")
         lines.append(
             f"<b>{idx}. {star}{ex['name']}</b>\n"
-            f"   └ Подходы: <b>{ex['sets']} × {ex['target_reps']} {unit}</b> (диапазон {ex['rep_min']}–{ex['rep_max']}) | "
-            f"Вес: <b>{weight_txt}</b> | Отдых: {ex['rest_sec']} сек\n"
+            f"   └ План: <b>{ex['sets']} × {ex['target_reps']} {unit}</b> ({ex['rep_min']}–{ex['rep_max']}) | "
+            f"Вес: <b>{weight_txt}</b> | Отдых: {ex['rest_sec']}с\n"
+            f"   └ Интенсивность: <b>{rir_txt}</b> | Темп: <b>{tempo_txt}</b>\n"
             f"   └ <i>Техника: {ex['cues']}</i>"
         )
     return "\n".join(lines)
@@ -766,6 +936,7 @@ class Onboarding(StatesGroup):
     duration = State()
     injuries = State()
     timezone = State()
+    personal_story = State()
 
 
 class ReportFlow(StatesGroup):
@@ -791,14 +962,18 @@ def get_webapp_url(req: web.Request | None = None) -> str:
     return ""
 
 
-def main_menu_kb() -> InlineKeyboardMarkup:
+def main_menu_kb(profile: dict | None = None) -> InlineKeyboardMarkup:
+    if profile is None:
+        profile = get_profile(ADMIN_TELEGRAM_ID)
     rows = []
     w_url = get_webapp_url()
     if w_url:
-        rows.append([InlineKeyboardButton(text="📱 Открыть Mini App (с картинками)", web_app=WebAppInfo(url=w_url))])
+        rows.append([InlineKeyboardButton(text="📱 Открыть Mini App (Pro Тренер)", web_app=WebAppInfo(url=w_url))])
+    rows.append([InlineKeyboardButton(text="🏋️ План на сегодня", callback_data="menu:plan")])
+    if profile and (profile.get("personal_story") or "").strip():
+        rows.append([InlineKeyboardButton(text="🔥 Мотивация (Личный разряд)", callback_data="menu:motivate")])
     rows.extend(
         [
-            [InlineKeyboardButton(text="🏋️ План на сегодня", callback_data="menu:plan")],
             [InlineKeyboardButton(text="📝 Сдать отчет по тренировке", callback_data="menu:report")],
             [InlineKeyboardButton(text="⚡ Мало времени (экспресс на 20 мин)", callback_data="menu:express")],
             [InlineKeyboardButton(text="😩 Хочу пропустить / Нет сил", callback_data="menu:excuse")],
@@ -821,7 +996,10 @@ def plan_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⏱ 120с", callback_data="timer:120"),
             InlineKeyboardButton(text="⏱ 180с", callback_data="timer:180"),
         ],
-        [InlineKeyboardButton(text="🔄 Заменить упражнение", callback_data="menu:swap_list")],
+        [
+            InlineKeyboardButton(text="🔄 Заменить упр.", callback_data="menu:swap_list"),
+            InlineKeyboardButton(text="🔥 Мотивация", callback_data="menu:motivate"),
+        ],
         [InlineKeyboardButton(text="📝 Сдать отчет по тренировке", callback_data="menu:report")],
         [InlineKeyboardButton(text="🔙 В главное меню", callback_data="menu:home")],
     ])
@@ -899,7 +1077,7 @@ async def start_onboarding(target_msg: Message, state: FSMContext) -> None:
     await target_msg.answer(
         "🔥 <b>Запускаем настройку твоего персонального тренера.</b>\n"
         "Отвечай честно и без воды — от этого зависит программа, КБЖУ и прогрессия нагрузок.\n\n"
-        "<b>Шаг 1/12.</b> Укажи свой пол:",
+        "<b>Шаг 1/13.</b> Укажи свой пол:",
         reply_markup=kb,
     )
 
@@ -909,7 +1087,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     profile = get_profile(message.from_user.id)
     if profile:
         await state.clear()
-        await message.answer("С возвращением в строй. Твой профиль активен.\n\n" + format_profile_summary(profile), reply_markup=main_menu_kb())
+        await message.answer("С возвращением в строй. Твой профиль активен.\n\n" + format_profile_summary(profile), reply_markup=main_menu_kb(profile))
     else:
         await start_onboarding(message, state)
 
@@ -921,7 +1099,7 @@ async def cmd_menu(message: Message, state: FSMContext) -> None:
     if not profile:
         await start_onboarding(message, state)
         return
-    await message.answer("Главное меню тренера. Выбирай задачу:", reply_markup=main_menu_kb())
+    await message.answer("Главное меню тренера. Выбирай задачу:", reply_markup=main_menu_kb(profile))
 
 
 @router.message(Command("domain"))
@@ -966,7 +1144,7 @@ async def onb_gender(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(gender=call.data.split(":", 1)[1])
     await state.set_state(Onboarding.age)
     await call.answer()
-    await call.message.answer("<b>Шаг 2/12.</b> Введи свой возраст (полных лет, например: <code>26</code>):")
+    await call.message.answer("<b>Шаг 2/13.</b> Введи свой возраст (полных лет, например: <code>26</code>):")
 
 
 @router.message(Onboarding.age)
@@ -976,7 +1154,7 @@ async def onb_age(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(age=int(message.text.strip()))
     await state.set_state(Onboarding.height)
-    await message.answer("<b>Шаг 3/12.</b> Введи свой рост в сантиметрах (например: <code>180</code>):")
+    await message.answer("<b>Шаг 3/13.</b> Введи свой рост в сантиметрах (например: <code>180</code>):")
 
 
 @router.message(Onboarding.height)
@@ -986,7 +1164,7 @@ async def onb_height(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(height=int(message.text.strip()))
     await state.set_state(Onboarding.weight)
-    await message.answer("<b>Шаг 4/12.</b> Введи свой текущий вес в кг (например: <code>78.5</code>):")
+    await message.answer("<b>Шаг 4/13.</b> Введи свой текущий вес в кг (например: <code>78.5</code>):")
 
 
 @router.message(Onboarding.weight)
@@ -1007,7 +1185,7 @@ async def onb_weight(message: Message, state: FSMContext) -> None:
             [InlineKeyboardButton(text="🏋️ Максимальная сила", callback_data="onb_goal:strength")],
         ]
     )
-    await message.answer("<b>Шаг 5/12.</b> Выбери главную цель:", reply_markup=kb)
+    await message.answer("<b>Шаг 5/13.</b> Выбери главную цель:", reply_markup=kb)
 
 
 @router.callback_query(Onboarding.goal, F.data.startswith("onb_goal:"))
@@ -1016,7 +1194,7 @@ async def onb_goal(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(Onboarding.priority_muscles)
     await call.answer()
     await call.message.answer(
-        "<b>Шаг 6/12.</b> Выбери <b>1–3 приоритетные мышечные группы</b>, которые хочешь накачать в первую очередь:",
+        "<b>Шаг 6/13.</b> Выбери <b>1–3 приоритетные мышечные группы</b>, которые хочешь накачать в первую очередь:",
         reply_markup=build_muscles_kb([]),
     )
 
@@ -1034,7 +1212,7 @@ async def onb_muscles(call: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(Onboarding.level)
         await call.answer()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=l, callback_data=f"onb_lvl:{k}")] for k, l in LEVEL_NAMES.items()])
-        await call.message.answer("<b>Шаг 7/12.</b> Выбери уровень сложности тренировок:", reply_markup=kb)
+        await call.message.answer("<b>Шаг 7/13.</b> Выбери уровень сложности тренировок:", reply_markup=kb)
         return
 
     if val in selected:
@@ -1055,7 +1233,7 @@ async def onb_level(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(level=call.data.split(":", 1)[1], equipment=[])
     await state.set_state(Onboarding.equipment)
     await call.answer()
-    await call.message.answer("<b>Шаг 8/12.</b> Выбери инвентарь / места тренировок (можно несколько):", reply_markup=build_equip_kb([]))
+    await call.message.answer("<b>Шаг 8/13.</b> Выбери инвентарь / места тренировок (можно несколько):", reply_markup=build_equip_kb([]))
 
 
 @router.callback_query(Onboarding.equipment, F.data.startswith("onb_eq:"))
@@ -1071,7 +1249,7 @@ async def onb_equipment(call: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(training_days=[])
         await state.set_state(Onboarding.training_days)
         await call.answer()
-        await call.message.answer("<b>Шаг 9/12.</b> Отметь дни недели, в которые ты ОБЯЗАН тренироваться:", reply_markup=build_days_kb([]))
+        await call.message.answer("<b>Шаг 9/13.</b> Отметь дни недели, в которые ты ОБЯЗАН тренироваться:", reply_markup=build_days_kb([]))
         return
 
     if val in selected:
@@ -1102,7 +1280,7 @@ async def onb_days(call: CallbackQuery, state: FSMContext) -> None:
                 [InlineKeyboardButton(text="60 мин", callback_data="onb_dur:60"), InlineKeyboardButton(text="90 мин", callback_data="onb_dur:90")],
             ]
         )
-        await call.message.answer("<b>Шаг 10/12.</b> Длительность одной тренировки:", reply_markup=kb)
+        await call.message.answer("<b>Шаг 10/13.</b> Длительность одной тренировки:", reply_markup=kb)
         return
 
     d = int(val)
@@ -1117,7 +1295,7 @@ async def onb_duration(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(duration=int(call.data.split(":", 1)[1]), injuries=[])
     await state.set_state(Onboarding.injuries)
     await call.answer()
-    await call.message.answer("<b>Шаг 11/12.</b> Есть ли травмы или проблемные зоны?", reply_markup=build_injuries_kb([]))
+    await call.message.answer("<b>Шаг 11/13.</b> Есть ли травмы или проблемные зоны?", reply_markup=build_injuries_kb([]))
 
 
 @router.callback_query(Onboarding.injuries, F.data.startswith("onb_inj:"))
@@ -1130,7 +1308,7 @@ async def onb_injuries(call: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(Onboarding.timezone)
         await call.answer()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=l, callback_data=f"onb_tz:{k}")] for k, l in TIMEZONE_OPTIONS])
-        await call.message.answer("<b>Шаг 12/12.</b> Выбери свой часовой пояс (для уведомлений в 09:00 и 20:00):", reply_markup=kb)
+        await call.message.answer("<b>Шаг 12/13.</b> Выбери свой часовой пояс (для уведомлений в 09:00 и 20:00):", reply_markup=kb)
         return
 
     if val == "none":
@@ -1145,18 +1323,63 @@ async def onb_injuries(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(Onboarding.timezone, F.data.startswith("onb_tz:"))
 async def onb_timezone(call: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    data["timezone"] = call.data.split(":", 1)[1]
-    save_profile(call.from_user.id, data)
-    profile = get_profile(call.from_user.id)
-    await state.clear()
-    await call.answer("Анкета сохранена!")
-    await call.message.answer(
-        "✅ <b>Анкета принята. Сплит, КБЖУ и рабочие объемы рассчитаны.</b>\n\n"
-        + format_profile_summary(profile)
-        + "\n\nНикаких оправданий — жми <b>«План на сегодня»</b> и начинай.",
-        reply_markup=main_menu_kb(),
+    await state.update_data(timezone=call.data.split(":", 1)[1])
+    await state.set_state(Onboarding.personal_story)
+    await call.answer()
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⏭ Пропустить этот шаг", callback_data="onb_story:skip")]]
     )
+    await call.message.answer(
+        "<b>Шаг 13/13 (По желанию). Личный стимул и топливо для мотивации 🔥</b>\n\n"
+        "Напиши одним сообщением: <b>о себе, ради чего или кого ты пашешь, кому хочешь утереть нос или кого боишься подвести / потерять</b>.\n\n"
+        "Система сама проанализирует твои слова, подберет лучший психологический рычаг и добавит кнопку <b>«🔥 Мотивация»</b>.",
+        reply_markup=kb,
+    )
+
+
+async def finish_onboarding(target_msg: Message, user_id: int, state: FSMContext, story: str) -> None:
+    data = await state.get_data()
+    data["personal_story"] = story.strip()
+    save_profile(user_id, data)
+    profile = get_profile(user_id)
+    await state.clear()
+    await target_msg.answer(
+        "✅ <b>Анкета принята! Сплит, периодизация, КБЖУ и рабочие объемы рассчитаны.</b>\n\n"
+        + format_profile_summary(profile)
+        + "\n\nНикаких оправданий — жми <b>«План на сегодня»</b> или открывай <b>Mini App</b>!",
+        reply_markup=main_menu_kb(profile),
+    )
+
+
+@router.callback_query(Onboarding.personal_story, F.data == "onb_story:skip")
+async def onb_story_skip(call: CallbackQuery, state: FSMContext) -> None:
+    await call.answer("Пропущено")
+    await finish_onboarding(call.message, call.from_user.id, state, "")
+
+
+@router.message(Onboarding.personal_story)
+async def onb_story_text(message: Message, state: FSMContext) -> None:
+    story = (message.text or "").strip()
+    await finish_onboarding(message, message.from_user.id, state, story)
+
+
+# ==================== ЛИЧНАЯ МОТИВАЦИЯ ====================
+
+@router.callback_query(F.data == "menu:motivate")
+async def cb_motivate(call: CallbackQuery) -> None:
+    profile = get_profile(call.from_user.id)
+    if not profile:
+        await call.answer("Сначала заполни анкету (/start)", show_alert=True)
+        return
+    await call.answer("🔥 Заряд выдан!")
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔥 Ещё заряд мотивации", callback_data="menu:motivate")],
+            [InlineKeyboardButton(text="🏋️ К плану на сегодня", callback_data="menu:plan_active")],
+            [InlineKeyboardButton(text="🔙 В главное меню", callback_data="menu:home")],
+        ]
+    )
+    await call.message.answer(build_personal_motivation(profile), reply_markup=kb)
 
 
 # ==================== ТАЙМЕР ОТДЫХА И ЗАМЕНА УПРАЖНЕНИЯ ====================
@@ -1252,6 +1475,9 @@ async def cb_excuse(call: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     profile = get_profile(call.from_user.id)
     goal_line = f"Твоя цель — <b>{GOAL_NAMES[profile['goal']]}</b>. " if profile else ""
+    story_line = ""
+    if profile and (profile.get("personal_story") or "").strip():
+        story_line = f"\n\n{build_personal_motivation(profile)}\n"
     await call.answer("Отговорки не принимаются!")
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -1259,7 +1485,10 @@ async def cb_excuse(call: CallbackQuery, state: FSMContext) -> None:
             [InlineKeyboardButton(text="🏋️ Иду делать базу по плану", callback_data="menu:plan")],
         ]
     )
-    await call.message.answer(f"🛑 <b>СТОП. Оправдания не принимаются.</b>\n\n{goal_line}{random.choice(EXCUSE_RESPONSES)}", reply_markup=kb)
+    await call.message.answer(
+        f"🛑 <b>СТОП. Оправдания не принимаются.</b>\n\n{goal_line}{random.choice(EXCUSE_RESPONSES)}{story_line}",
+        reply_markup=kb,
+    )
 
 
 @router.callback_query(F.data == "menu:progress")
@@ -1308,7 +1537,7 @@ async def msg_bodyweight_input(message: Message, state: FSMContext) -> None:
     await message.answer(
         f"✅ Вес обновлен: <b>{curr_bw:g} кг</b> (от старта: <b>{sign}{diff:g} кг</b>).\n"
         f"🥩 Пересчитанная норма: <b>{nut['kcal']} ккал</b> (Б: {nut['protein']}г / Ж: {nut['fat']}г / У: {nut['carbs']}г).",
-        reply_markup=main_menu_kb(),
+        reply_markup=main_menu_kb(profile),
     )
 
 
@@ -1404,7 +1633,7 @@ async def advance_report_step(target_msg: Message, state: FSMContext, logged_wei
         else:
             summary = "⚠️ Ты пропустил все упражнения. Тренировка не засчитана в журнал."
         await state.clear()
-        await target_msg.answer(summary, reply_markup=main_menu_kb())
+        await target_msg.answer(summary, reply_markup=main_menu_kb(profile))
 
 
 @router.callback_query(F.data == "menu:report")
@@ -1493,6 +1722,13 @@ async def handle_api_state(request: web.Request) -> web.Response:
         })
 
     plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode=mode)
+    for ex in plan.get("exercises", []):
+        if "rir" not in ex or "tempo" not in ex:
+            rx = get_coaching_prescription(ex, ex.get("is_priority", False), profile["goal"])
+            ex.setdefault("rir", rx["rir"])
+            ex.setdefault("tempo", rx["tempo"])
+            ex.setdefault("role", rx["role"])
+
     split_name, _ = determine_split(profile)
     nut = calculate_nutrition(profile)
 
@@ -1529,6 +1765,7 @@ async def handle_api_state(request: web.Request) -> web.Response:
         "nutrition": nut,
         "plan": plan,
         "quote": random.choice(MORNING_QUOTES),
+        "personal_motivation": build_personal_motivation(profile),
         "progress": {"total_workouts": total_workouts, "items": prog_items},
         "muscle_names": MUSCLE_NAMES,
         "weekday_names": WEEKDAY_NAMES,
@@ -1605,7 +1842,7 @@ async def handle_api_finish_workout(request: web.Request) -> web.Response:
             await bot_inst.send_message(
                 chat_id=ADMIN_TELEGRAM_ID,
                 text=f"🏁 <b>ТРЕНИРОВКА В MINI APP ЗАКРЫТА!</b>\nВыполнено упражнений: <b>{len(logged)}/{len(plan['exercises'])}</b>.\n\n{praise}",
-                reply_markup=main_menu_kb(),
+                reply_markup=main_menu_kb(profile),
             )
         except Exception:
             pass
@@ -1613,7 +1850,17 @@ async def handle_api_finish_workout(request: web.Request) -> web.Response:
 
 
 async def handle_api_excuse(request: web.Request) -> web.Response:
-    return web.json_response({"ok": True, "message": random.choice(EXCUSE_RESPONSES)})
+    profile = get_profile(ADMIN_TELEGRAM_ID)
+    story = (profile.get("personal_story") or "").strip() if profile else ""
+    base = random.choice(EXCUSE_RESPONSES)
+    if story:
+        base += f"<br><br>{build_personal_motivation(profile)}"
+    return web.json_response({"ok": True, "message": base})
+
+
+async def handle_api_motivate(request: web.Request) -> web.Response:
+    profile = get_profile(ADMIN_TELEGRAM_ID)
+    return web.json_response({"ok": True, "message": build_personal_motivation(profile)})
 
 
 async def handle_api_bodyweight(request: web.Request) -> web.Response:
@@ -1641,12 +1888,15 @@ async def hourly_discipline_check(bot: Bot) -> None:
     if now_local.weekday() not in profile["training_days"]:
         return
     try:
+        story = (profile.get("personal_story") or "").strip()
         if now_local.hour == 9:
             plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode="regular")
-            text = f"⏰ <b>09:00 | ПОДЪЕМ НА ТРЕНИРОВКУ</b>\n\n{random.choice(MORNING_QUOTES)}\n\n{format_workout_plan(plan)}"
+            mot_line = f"\n\n{build_personal_motivation(profile)}" if story else f"\n\n{random.choice(MORNING_QUOTES)}"
+            text = f"⏰ <b>09:00 | ПОДЪЕМ НА ТРЕНИРОВКУ</b>{mot_line}\n\n{format_workout_plan(plan)}"
             await send_safe_html(bot, ADMIN_TELEGRAM_ID, text, reply_markup=plan_menu_kb())
         elif now_local.hour == 20 and not has_logged_today(profile):
-            text = f"🚨 <b>20:00 | КОНТРОЛЬ ДИСЦИПЛИНЫ</b>\n\n{random.choice(EVENING_SHAME_QUOTES)}"
+            story_shame = f"\n\n{build_personal_motivation(profile)}" if story else ""
+            text = f"🚨 <b>20:00 | КОНТРОЛЬ ДИСЦИПЛИНЫ</b>\n\n{random.choice(EVENING_SHAME_QUOTES)}{story_shame}"
             await bot.send_message(chat_id=ADMIN_TELEGRAM_ID, text=text, reply_markup=evening_kick_kb())
     except Exception as exc:
         logging.error(f"Ошибка планировщика: {exc}")
@@ -1668,6 +1918,7 @@ async def main() -> None:
     app.router.add_post("/api/swap", handle_api_swap)
     app.router.add_post("/api/finish_workout", handle_api_finish_workout)
     app.router.add_get("/api/excuse", handle_api_excuse)
+    app.router.add_get("/api/motivate", handle_api_motivate)
     app.router.add_post("/api/bodyweight", handle_api_bodyweight)
     app.router.add_post("/api/save_profile", handle_api_save_profile)
 
