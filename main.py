@@ -1,7 +1,9 @@
 # main.py
 
 import asyncio
+import base64
 import html
+import io
 import json
 import logging
 import os
@@ -21,6 +23,12 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, MenuButtonWebApp, Message, WebAppInfo
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+try:
+    from PIL import Image, ImageStat
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 from data_bank import (
     ADAPTIVE_MOTIVATION_PACKS,
@@ -86,6 +94,7 @@ def init_db() -> None:
                 injuries TEXT NOT NULL,
                 timezone TEXT NOT NULL DEFAULT 'Europe/Moscow',
                 personal_story TEXT NOT NULL DEFAULT '',
+                body_analysis TEXT NOT NULL DEFAULT '',
                 workout_counter INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
@@ -122,6 +131,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE user_profile ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Europe/Moscow';")
         if "personal_story" not in u_cols:
             conn.execute("ALTER TABLE user_profile ADD COLUMN personal_story TEXT NOT NULL DEFAULT '';")
+        if "body_analysis" not in u_cols:
+            conn.execute("ALTER TABLE user_profile ADD COLUMN body_analysis TEXT NOT NULL DEFAULT '';")
 
         p_cols = {r["name"] for r in conn.execute("PRAGMA table_info(exercise_progress)").fetchall()}
         if "fail_streak" not in p_cols:
@@ -161,6 +172,171 @@ def today_str(profile: dict | None = None) -> str:
 
 def now_iso(profile: dict | None = None) -> str:
     return datetime.now(get_user_tz(profile)).isoformat()
+
+
+# ==================== АНАЛИЗАТОР ФОРМЫ ТЕЛА ПО ФОТО (CV + АНТРОПОМЕТРИЯ) ====================
+
+def _extract_image_metrics(img_bytes: bytes) -> dict:
+    """Извлекает пропорции силуэта, ширину плеч/талии/бедер и рельефность (контраст теней) из фото."""
+    if not HAS_PIL:
+        return {"contrast": 48.0, "shoulder_waist_ratio": 1.32, "upper_lower_ratio": 1.05}
+    try:
+        im = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        im.thumbnail((240, 320))
+        w, h = im.size
+        gray = im.convert("L")
+
+        # Центральная область тела (20%..80% ширины, 15%..88% высоты)
+        torso_crop = gray.crop((int(w * 0.22), int(h * 0.18), int(w * 0.78), int(h * 0.62)))
+        stat = ImageStat.Stat(torso_crop)
+        contrast = float(stat.stddev[0])  # Выше стандартное отклонение яркости = глубже мышечные тени/сепарация
+
+        # Оценка ширины силуэта по горизонтальным поясам (плечи, талия, бедра) через градиент краев
+        px = gray.load()
+        row_widths = []
+        for y in range(int(h * 0.15), int(h * 0.88)):
+            bg_l = px[2, y]
+            bg_r = px[w - 3, y]
+            left_x, right_x = int(w * 0.25), int(w * 0.75)
+            for x in range(4, w // 2):
+                if abs(px[x, y] - bg_l) > 26:
+                    left_x = x
+                    break
+            for x in range(w - 5, w // 2, -1):
+                if abs(px[x, y] - bg_r) > 26:
+                    right_x = x
+                    break
+            span = max(10, right_x - left_x)
+            row_widths.append((y / h, span))
+
+        def avg_span(y1: float, y2: float) -> float:
+            vals = [s for yr, s in row_widths if y1 <= yr <= y2]
+            return sum(vals) / len(vals) if vals else 50.0
+
+        shoulders_w = avg_span(0.20, 0.30)
+        waist_w = avg_span(0.42, 0.52)
+        legs_w = avg_span(0.58, 0.75)
+
+        sw_ratio = max(1.05, min(1.75, shoulders_w / max(1.0, waist_w)))
+        ul_ratio = max(0.75, min(1.45, shoulders_w / max(1.0, legs_w)))
+        return {
+            "contrast": round(contrast, 1),
+            "shoulder_waist_ratio": round(sw_ratio, 2),
+            "upper_lower_ratio": round(ul_ratio, 2),
+        }
+    except Exception as exc:
+        logging.warning(f"CV image parse fallback: {exc}")
+        return {"contrast": 48.0, "shoulder_waist_ratio": 1.32, "upper_lower_ratio": 1.05}
+
+
+def analyze_body_photos(photo_bytes_list: list[bytes], profile: dict) -> dict:
+    """
+    Комплексный тренерский разбор формы по 1–4 фотографиям (спереди, сбоку, со спины, ноги)
+    с учетом роста, веса, пола, возраста и цели атлета.
+    """
+    w = float(profile.get("weight", 75))
+    h_cm = int(profile.get("height", 178))
+    h_m = max(1.2, h_cm / 100.0)
+    age = int(profile.get("age", 24))
+    is_male = profile.get("gender", "Мужской") == "Мужской"
+    bmi = w / (h_m * h_m)
+
+    metrics = [_extract_image_metrics(b) for b in photo_bytes_list if b]
+    avg_contrast = sum(m["contrast"] for m in metrics) / len(metrics) if metrics else 48.0
+    avg_sw = sum(m["shoulder_waist_ratio"] for m in metrics) / len(metrics) if metrics else 1.32
+    avg_ul = sum(m["upper_lower_ratio"] for m in metrics) / len(metrics) if metrics else 1.05
+
+    # Оценка процента подкожного жира по формуле Деуренберга + коррекция по визуальному рельефу и V-индексу
+    sex_bit = 1 if is_male else 0
+    raw_bf = (1.20 * bmi) + (0.23 * age) - (10.8 * sex_bit) - 5.4
+    relief_adj = (48.0 - avg_contrast) * 0.14  # Хорошая мышечная сепарация снижает оценку жира
+    v_taper_adj = (1.32 - avg_sw) * 8.0
+    est_bf = round(max(6.5 if is_male else 13.0, min(38.0, raw_bf + relief_adj + v_taper_adj)), 1)
+
+    # Определение соматотипа и текущей кондиции
+    if is_male:
+        if est_bf <= 12.5:
+            condition = "Сухая атлетичная форма (высокая детализация мышц)"
+            kcal_factor = 1.15
+        elif est_bf <= 17.5:
+            condition = "Сбалансированная спортивная форма (оптимально для чистого набора)"
+            kcal_factor = 1.08
+        elif est_bf <= 22.5:
+            condition = "Умеренный процент жира (нужна рекомпозиция: рост мышц + контроль талии)"
+            kcal_factor = 0.96
+        else:
+            condition = "Повышенный процент жира (в приоритете сушка и плотный метаболический тренинг)"
+            kcal_factor = 0.85
+    else:
+        if est_bf <= 19.0:
+            condition = "Подтянутая рельефная форма"
+            kcal_factor = 1.12
+        elif est_bf <= 25.0:
+            condition = "Сбалансированная форма (идеально для тонуса и пропорций)"
+            kcal_factor = 1.04
+        else:
+            condition = "Повышенный процент жира (акцент на жиросжигание и сохранение мышц)"
+            kcal_factor = 0.86
+
+    # Выявление отстающих мышечных групп по пропорциям фото и ИМТ
+    lagging_muscles = []
+    notes = []
+
+    if avg_sw < 1.28:
+        lagging_muscles.extend(["shoulders", "back"])
+        notes.append("• <b>V-силуэт (плечи и широчайшие):</b> нужно расширить верх спины и средние дельты, чтобы визуально сузить талию.")
+    else:
+        notes.append("• <b>Верхний плечевой пояс:</b> хорошая ширина костяка — делаем акцент на наполненность грудных и дельт.")
+
+    if avg_ul > 1.08 or bmi < 21.5:
+        lagging_muscles.extend(["quads", "hamstrings"])
+        notes.append("• <b>Ноги и задняя цепь:</b> нижняя часть тела уступает верху — добавляем прицельный объем на квадрицепсы и бицепс бедра.")
+    else:
+        notes.append("• <b>Баланс верх/низ:</b> пропорции ног и корпуса гармоничные, сохраняем силовой прогресс в базе.")
+
+    if bmi < 20.5:
+        lagging_muscles.append("chest")
+        notes.append("• <b>Общая мышечная масса:</b> дефицит мышечного каркаса — фокус на тяжелые базовые жимы и тяги в 6–10 повторениях.")
+    elif est_bf >= (19.0 if is_male else 26.0):
+        lagging_muscles.append("abs")
+        notes.append("• <b>Кор и талия:</b> добавляем регулярную силовую работу на пресс и сокращаем паузы отдыха для расхода калорий.")
+
+    # Убираем дубли, оставляем до 3 ключевых зон
+    unique_lagging = []
+    for m in lagging_muscles:
+        if m not in unique_lagging:
+            unique_lagging.append(m)
+    unique_lagging = unique_lagging[:3] or ["chest", "back"]
+
+    lagging_names = ", ".join(MUSCLE_NAMES[m] for m in unique_lagging)
+    coach_verdict = (
+        f"📸 <b>ВЕРДИКТ ТРЕНЕРА ПО ФОТО ({len(photo_bytes_list)} ракурс.):</b>\n"
+        f"• Текущая кондиция: <b>{condition}</b>\n"
+        f"• Оценка жировой прослойки: <b>~{est_bf}%</b> (ИМТ: {bmi:.1f})\n"
+        f"• Приоритет коррекции по фото: <b>{lagging_names}</b>\n"
+        + "\n".join(notes)
+    )
+
+    return {
+        "photos_count": len(photo_bytes_list),
+        "est_bf": est_bf,
+        "bmi": round(bmi, 1),
+        "condition": condition,
+        "lagging_muscles": unique_lagging,
+        "kcal_factor": kcal_factor,
+        "verdict_html": coach_verdict,
+        "updated_at": now_iso(profile),
+    }
+
+
+def save_body_analysis(user_id: int, analysis: dict) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE user_profile SET body_analysis = ? WHERE user_id = ?",
+            (json.dumps(analysis, ensure_ascii=False), user_id),
+        )
+        # Сбрасываем активный план на сегодня, чтобы программа мгновенно перестроилась под фото!
+        conn.execute("DELETE FROM active_workouts WHERE user_id = ?", (user_id,))
 
 
 # ==================== АДАПТИВНЫЙ АНАЛИЗАТОР ТЕКСТА И МОТИВАЦИИ ====================
@@ -213,7 +389,6 @@ def build_personal_motivation(profile: dict | None) -> str:
     archetype = detect_motivation_archetype(story)
     pack = ADAPTIVE_MOTIVATION_PACKS.get(archetype, ADAPTIVE_MOTIVATION_PACKS["hardcore_default"])
 
-    # Подбираем также контекст текущего прогресса, если есть закрытые тренировки
     with get_conn() as conn:
         total_w = conn.execute("SELECT COUNT(*) AS cnt FROM workout_logs").fetchone()["cnt"]
         deload_cnt = conn.execute("SELECT COUNT(*) AS cnt FROM exercise_progress WHERE fail_streak >= 1").fetchone()["cnt"]
@@ -255,6 +430,18 @@ def calculate_nutrition(profile: dict) -> dict:
         protein = round(w * 2.0)
         fat = round(w * 1.0)
 
+    # Тонкая калибровка калорийности по результатам фото-анализа тела (если он пройден)
+    ba = profile.get("body_analysis")
+    if isinstance(ba, dict) and ba.get("kcal_factor"):
+        factor = float(ba["kcal_factor"])
+        if goal == "mass" and factor < 1.0:
+            # Если выбран набор массы, но по фото виден повышенный жир — ставим чистую рекомпозицию без заливания жиром
+            kcal = round(tdee * 0.98)
+            protein = round(w * 2.2)
+        elif goal == "cut" and factor > 1.10:
+            # Если человек уже очень сухой, делаем мягкий дефицит чтобы не сжечь мышцы
+            kcal = round(tdee * 0.90)
+
     carbs = max(60, round((kcal - (protein * 4 + fat * 9)) / 4))
     return {"kcal": kcal, "protein": protein, "fat": fat, "carbs": carbs}
 
@@ -267,6 +454,7 @@ def save_profile(user_id: int, data: dict) -> None:
     tz = data.get("timezone", DEFAULT_TIMEZONE)
     eq_list = normalize_equipment(data.get("equipment"))
     story = str(data.get("personal_story", existing.get("personal_story", "") if existing else "")).strip()
+    existing_ba = json.dumps(existing["body_analysis"], ensure_ascii=False) if (existing and existing.get("body_analysis")) else ""
 
     with get_conn() as conn:
         conn.execute(
@@ -274,8 +462,8 @@ def save_profile(user_id: int, data: dict) -> None:
             INSERT INTO user_profile (
                 user_id, gender, age, height, weight, initial_body_weight, goal,
                 priority_muscles, level, equipment, training_days,
-                duration, injuries, timezone, personal_story, workout_counter, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration, injuries, timezone, personal_story, body_analysis, workout_counter, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 gender=excluded.gender,
                 age=excluded.age,
@@ -298,7 +486,7 @@ def save_profile(user_id: int, data: dict) -> None:
                 data["level"], json.dumps(eq_list, ensure_ascii=False),
                 json.dumps(sorted(data["training_days"])),
                 int(data["duration"]), json.dumps(data["injuries"], ensure_ascii=False),
-                tz, story, counter, now_iso({"timezone": tz}),
+                tz, story, existing_ba, counter, now_iso({"timezone": tz}),
             ),
         )
         conn.execute("DELETE FROM active_workouts WHERE user_id = ?", (user_id,))
@@ -330,6 +518,14 @@ def get_profile(user_id: int) -> dict | None:
     d["injuries"] = json.loads(d["injuries"])
     d["equipment"] = normalize_equipment(d["equipment"])
     d["personal_story"] = d.get("personal_story") or ""
+    raw_ba = d.get("body_analysis") or ""
+    if raw_ba:
+        try:
+            d["body_analysis"] = json.loads(raw_ba)
+        except Exception:
+            d["body_analysis"] = None
+    else:
+        d["body_analysis"] = None
     d["motivation_archetype_label"] = (
         ADAPTIVE_MOTIVATION_PACKS[detect_motivation_archetype(d["personal_story"])]["label"]
         if d["personal_story"].strip() else ""
@@ -443,23 +639,35 @@ def get_exercise_targets(ex: dict, goal: str, level: str = "intermediate") -> tu
     return 0.0, rep_min, rep_min, rep_max
 
 
-def get_coaching_prescription(ex: dict, is_priority: bool, goal: str) -> dict:
+def get_coaching_prescription(ex: dict, is_priority: bool, goal: str, is_photo_lagging: bool = False) -> dict:
     is_comp = ex["is_compound"]
     is_timed = ex.get("is_timed", False)
     if is_timed:
         return {
             "rir": "До жжения (RPE 9)",
             "tempo": "Статика без провисания",
-            "role": "Изометрическая стабилизация",
+            "role": "📸 Коррекция по фото • Стабилизация" if is_photo_lagging else "Изометрическая стабилизация",
         }
     if is_comp:
         rir = "RIR 1–2 (1–2 повт. в запасе)" if goal != "strength" else "RIR 1 (тяжелый силовой сет)"
         tempo = "2–1–1 (2с негатив, 1с пауза)"
-        role = "🎯 Ударная база (главный стимул роста)" if is_priority else "Базовое многосуставное движение"
+        if is_photo_lagging and is_priority:
+            role = "🎯📸 Двойной акцент (Анкета + Анализ фото)"
+        elif is_photo_lagging:
+            role = "📸 Коррекция пропорций по фото"
+        elif is_priority:
+            role = "🎯 Ударная база (главный стимул роста)"
+        else:
+            role = "Базовое многосуставное движение"
     else:
         rir = "RIR 0–1 (почти до отказа)"
         tempo = "2–0–1 + 1с пиковое сжатие"
-        role = "🎯 Прицельная гипертрофия" if is_priority else "Изолирующая добивка и памп"
+        if is_photo_lagging:
+            role = "📸 Прицельная доработка по фото"
+        elif is_priority:
+            role = "🎯 Прицельная гипертрофия"
+        else:
+            role = "Изолирующая добивка и памп"
     return {"rir": rir, "tempo": tempo, "role": role}
 
 
@@ -470,7 +678,12 @@ def build_regular_workout(profile: dict) -> dict:
     rotation_cycle = w_counter // len(split_days)
     day_template = split_days[day_idx]
 
-    priority = set(profile["priority_muscles"])
+    # Объединяем приоритеты анкеты и отстающие зоны, выявленные на фото тела
+    user_priority = set(profile["priority_muscles"])
+    ba = profile.get("body_analysis")
+    photo_lagging = set(ba.get("lagging_muscles", [])) if isinstance(ba, dict) else set()
+    effective_priority = user_priority.union(photo_lagging)
+
     goal = profile["goal"]
     level = profile["level"]
     max_seconds = profile["duration"] * 60
@@ -485,16 +698,18 @@ def build_regular_workout(profile: dict) -> dict:
         base_sets = 3
         diff_rest_mult = 1.0
 
+    # Если по фото виден повышенный процент жира, чуть ускоряем темп тренировки
+    bf_rest_mult = 0.90 if (isinstance(ba, dict) and float(ba.get("est_bf", 15)) >= 20.0) else 1.0
     goal_rest_mult = 1.20 if goal == "strength" else (0.80 if goal == "cut" else 1.0)
-    rest_mult = goal_rest_mult * diff_rest_mult
+    rest_mult = goal_rest_mult * diff_rest_mult * bf_rest_mult
 
     big_muscles = {"chest", "back", "quads", "hamstrings", "glutes"}
     ordered_muscles = sorted(
         day_template["muscles"],
         key=lambda m: (
-            0 if (m in priority and m in big_muscles) else (
+            0 if (m in effective_priority and m in big_muscles) else (
                 1 if m in big_muscles else (
-                    2 if m in priority else (4 if m == "abs" else 3)
+                    2 if m in effective_priority else (4 if m == "abs" else 3)
                 )
             )
         ),
@@ -509,7 +724,8 @@ def build_regular_workout(profile: dict) -> dict:
         compounds = [c for c in candidates if c["is_compound"]]
         isolations = [c for c in candidates if not c["is_compound"]]
 
-        is_priority = muscle in priority
+        is_priority = muscle in effective_priority
+        is_lagging = muscle in photo_lagging
         want_two = is_priority and len(candidates) >= 2 and profile["duration"] >= 45 and muscle in big_muscles
 
         chosen_for_muscle = []
@@ -540,13 +756,14 @@ def build_regular_workout(profile: dict) -> dict:
                 continue
 
             weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal, level)
-            rx = get_coaching_prescription(ex, is_priority, goal)
+            rx = get_coaching_prescription(ex, muscle in user_priority, goal, is_photo_lagging=is_lagging)
             used_ids.add(ex["id"])
             selected_exercises.append({
                 "id": ex["id"],
                 "name": ex["name"],
                 "muscle": muscle,
                 "is_priority": is_priority,
+                "is_photo_lagging": is_lagging,
                 "is_compound": ex["is_compound"],
                 "is_timed": ex.get("is_timed", False),
                 "sets": sets,
@@ -569,17 +786,25 @@ def build_regular_workout(profile: dict) -> dict:
         )
     )
 
+    coach_note = ""
+    if isinstance(ba, dict) and ba.get("lagging_muscles"):
+        l_names = ", ".join(MUSCLE_NAMES[m] for m in ba["lagging_muscles"] if m in MUSCLE_NAMES)
+        coach_note = f"📸 Учтён анализ фото (~{ba['est_bf']}% жира): добавлен приоритетный объём на {l_names}."
+
     return {
         "workout_type": "regular",
         "split_name": split_name,
         "day_title": day_template["day_title"],
         "est_minutes": max(25, round(total_time / 60)),
+        "coach_note": coach_note,
         "exercises": selected_exercises,
     }
 
 
 def build_express_workout(profile: dict) -> dict:
-    priority = list(profile["priority_muscles"])
+    ba = profile.get("body_analysis")
+    photo_lagging = list(ba.get("lagging_muscles", [])) if isinstance(ba, dict) else []
+    priority = list(profile["priority_muscles"]) + photo_lagging
     goal = profile["goal"]
     level = profile["level"]
     target_muscles_pool = priority + ["chest", "back", "quads", "abs"]
@@ -602,13 +827,14 @@ def build_express_workout(profile: dict) -> dict:
         used_ids.add(ex["id"])
 
         weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal, level)
-        rx = get_coaching_prescription(ex, muscle in priority, goal)
+        rx = get_coaching_prescription(ex, muscle in priority, goal, is_photo_lagging=(muscle in photo_lagging))
         superset_label = "Суперсет A" if i < 2 else "Суперсет B"
         exercises.append({
             "id": ex["id"],
             "name": f"[{superset_label}] {ex['name']}",
             "muscle": muscle,
             "is_priority": muscle in priority,
+            "is_photo_lagging": muscle in photo_lagging,
             "is_compound": ex["is_compound"],
             "is_timed": ex.get("is_timed", False),
             "sets": sets_count,
@@ -628,6 +854,7 @@ def build_express_workout(profile: dict) -> dict:
         "split_name": "Экспресс-протокол (Антагонистические суперсеты)",
         "day_title": "Высокоплотный 20-минутный блок на целевые мышцы",
         "est_minutes": 20,
+        "coach_note": "",
         "exercises": exercises,
     }
 
@@ -670,7 +897,7 @@ def swap_exercise_in_plan(user_id: int, ex_index: int) -> tuple[bool, str, dict 
 
     new_ex = random.choice(candidates)
     weight, t_reps, r_min, r_max = get_exercise_targets(new_ex, profile["goal"], profile["level"])
-    rx = get_coaching_prescription(new_ex, old_ex["is_priority"], profile["goal"])
+    rx = get_coaching_prescription(new_ex, old_ex["is_priority"], profile["goal"], old_ex.get("is_photo_lagging", False))
 
     prefix_match = re.match(r"^(\[Суперсет [^\]]+\]\s*)", old_ex["name"])
     prefix = prefix_match.group(1) if prefix_match else ""
@@ -680,6 +907,7 @@ def swap_exercise_in_plan(user_id: int, ex_index: int) -> tuple[bool, str, dict 
         "name": f"{prefix}{new_ex['name']}",
         "muscle": muscle,
         "is_priority": old_ex["is_priority"],
+        "is_photo_lagging": old_ex.get("is_photo_lagging", False),
         "is_compound": new_ex["is_compound"],
         "is_timed": new_ex.get("is_timed", False),
         "sets": old_ex["sets"],
@@ -793,6 +1021,9 @@ def format_profile_summary(profile: dict) -> str:
     arch_lbl = profile.get("motivation_archetype_label", "")
     story_line = f"• Личный триггер: <i>«{html.escape(story)}»</i> ({arch_lbl})\n" if story else ""
 
+    ba = profile.get("body_analysis")
+    ba_block = f"\n\n{ba['verdict_html']}" if isinstance(ba, dict) and ba.get("verdict_html") else ""
+
     return (
         f"📋 <b>ТВОЙ ПРОФИЛЬ АТЛЕТА</b>\n"
         f"• Параметры: {profile['gender']}, {profile['age']} лет, {profile['height']} см, {profile['weight']:g} кг\n"
@@ -805,6 +1036,7 @@ def format_profile_summary(profile: dict) -> str:
         f"• Подобранный сплит: <b>{split_name}</b>\n\n"
         f"🥩 <b>СУТОЧНАЯ НОРМА КБЖУ ПОД ЦЕЛЬ:</b>\n"
         f"<b>{nut['kcal']} ккал</b> | Белки: <b>{nut['protein']}г</b> | Жиры: <b>{nut['fat']}г</b> | Углеводы: <b>{nut['carbs']}г</b>"
+        f"{ba_block}"
     )
 
 
@@ -812,8 +1044,12 @@ def format_workout_plan(plan: dict) -> str:
     lines = [
         f"🏋️ <b>{plan['day_title']}</b>",
         f"📌 Сплит: <i>{plan['split_name']}</i>",
-        f"⏱ Расчетное время: ~{plan['est_minutes']} мин\n",
+        f"⏱ Расчетное время: ~{plan['est_minutes']} мин",
     ]
+    if plan.get("coach_note"):
+        lines.append(f"<i>{plan['coach_note']}</i>")
+    lines.append("")
+
     if plan["workout_type"] == "express":
         lines.append(
             "⚡ <b>РЕЖИМ СУПЕРСЕТОВ:</b> Выполняй упражнения внутри одного суперсета подряд без отдыха, "
@@ -821,7 +1057,7 @@ def format_workout_plan(plan: dict) -> str:
         )
 
     for idx, ex in enumerate(plan["exercises"], start=1):
-        star = "🎯 [АКЦЕНТ] " if ex["is_priority"] else ""
+        star = "📸 " if ex.get("is_photo_lagging") else ("🎯 " if ex["is_priority"] else "")
         weight_txt = f"{ex['target_weight']:g} кг" if ex["target_weight"] > 0 else "Свой вес"
         unit = "сек" if ex.get("is_timed") else "повт."
         rir_txt = ex.get("rir", "RIR 1–2")
@@ -854,6 +1090,10 @@ def format_progress_report(profile: dict) -> str:
         f"⚖️ Собственный вес: <b>{init_bw:g} кг → {curr_bw:g} кг</b> ({bw_sign}{bw_diff:g} кг)\n"
         f"🥩 Актуальная норма: <b>{nut['kcal']} ккал</b> (Б: {nut['protein']}г / Ж: {nut['fat']}г / У: {nut['carbs']}г)\n"
     )
+
+    ba = profile.get("body_analysis")
+    if isinstance(ba, dict) and ba.get("verdict_html"):
+        header += f"\n{ba['verdict_html']}\n"
 
     if not rows:
         return header + "\nПока в журнале <b>0 выполненных тренировок</b>. Сдай первый отчет, чтобы запустить трекер весов и рекордов!"
@@ -938,6 +1178,11 @@ class Onboarding(StatesGroup):
     injuries = State()
     timezone = State()
     personal_story = State()
+    body_photos = State()
+
+
+class BodyScanOnly(StatesGroup):
+    collecting_photos = State()
 
 
 class ReportFlow(StatesGroup):
@@ -975,6 +1220,7 @@ def main_menu_kb(profile: dict | None = None) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="🔥 Мотивация (Личный разряд)", callback_data="menu:motivate")])
     rows.extend(
         [
+            [InlineKeyboardButton(text="📸 Анализ формы тела по фото", callback_data="menu:bodyscan")],
             [InlineKeyboardButton(text="📝 Сдать отчет по тренировке", callback_data="menu:report")],
             [InlineKeyboardButton(text="⚡ Мало времени (экспресс на 20 мин)", callback_data="menu:express")],
             [InlineKeyboardButton(text="😩 Хочу пропустить / Нет сил", callback_data="menu:excuse")],
@@ -1010,6 +1256,7 @@ def plan_menu_kb() -> InlineKeyboardMarkup:
 def progress_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="📸 Обновить фото-анализ формы", callback_data="menu:bodyscan")],
             [InlineKeyboardButton(text="⚖️ Записать новый вес тела", callback_data="menu:bodyweight")],
             [InlineKeyboardButton(text="🔙 В главное меню", callback_data="menu:home")],
         ]
@@ -1064,6 +1311,15 @@ def build_injuries_kb(selected: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def build_photo_step_kb(count: int, is_onboarding: bool) -> InlineKeyboardMarkup:
+    prefix = "onb_photo" if is_onboarding else "scan_photo"
+    rows = []
+    if count > 0:
+        rows.append([InlineKeyboardButton(text=f"✅ Готово, проанализировать ({count} фото)", callback_data=f"{prefix}:done")])
+    rows.append([InlineKeyboardButton(text="⏭ Пропустить" if is_onboarding else "❌ Отмена", callback_data=f"{prefix}:skip")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 # ==================== АНКЕТИРОВАНИЕ (/start) ====================
 
 async def start_onboarding(target_msg: Message, state: FSMContext) -> None:
@@ -1078,7 +1334,7 @@ async def start_onboarding(target_msg: Message, state: FSMContext) -> None:
     await target_msg.answer(
         "🔥 <b>Запускаем настройку твоего персонального тренера.</b>\n"
         "Отвечай честно и без воды — от этого зависит программа, КБЖУ и прогрессия нагрузок.\n\n"
-        "<b>Шаг 1/13.</b> Укажи свой пол:",
+        "<b>Шаг 1/14.</b> Укажи свой пол:",
         reply_markup=kb,
     )
 
@@ -1145,7 +1401,7 @@ async def onb_gender(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(gender=call.data.split(":", 1)[1])
     await state.set_state(Onboarding.age)
     await call.answer()
-    await call.message.answer("<b>Шаг 2/13.</b> Введи свой возраст (полных лет, например: <code>26</code>):")
+    await call.message.answer("<b>Шаг 2/14.</b> Введи свой возраст (полных лет, например: <code>26</code>):")
 
 
 @router.message(Onboarding.age)
@@ -1155,7 +1411,7 @@ async def onb_age(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(age=int(message.text.strip()))
     await state.set_state(Onboarding.height)
-    await message.answer("<b>Шаг 3/13.</b> Введи свой рост в сантиметрах (например: <code>180</code>):")
+    await message.answer("<b>Шаг 3/14.</b> Введи свой рост в сантиметрах (например: <code>180</code>):")
 
 
 @router.message(Onboarding.height)
@@ -1165,7 +1421,7 @@ async def onb_height(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(height=int(message.text.strip()))
     await state.set_state(Onboarding.weight)
-    await message.answer("<b>Шаг 4/13.</b> Введи свой текущий вес в кг (например: <code>78.5</code>):")
+    await message.answer("<b>Шаг 4/14.</b> Введи свой текущий вес в кг (например: <code>78.5</code>):")
 
 
 @router.message(Onboarding.weight)
@@ -1186,7 +1442,7 @@ async def onb_weight(message: Message, state: FSMContext) -> None:
             [InlineKeyboardButton(text="🏋️ Максимальная сила", callback_data="onb_goal:strength")],
         ]
     )
-    await message.answer("<b>Шаг 5/13.</b> Выбери главную цель:", reply_markup=kb)
+    await message.answer("<b>Шаг 5/14.</b> Выбери главную цель:", reply_markup=kb)
 
 
 @router.callback_query(Onboarding.goal, F.data.startswith("onb_goal:"))
@@ -1195,7 +1451,7 @@ async def onb_goal(call: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(Onboarding.priority_muscles)
     await call.answer()
     await call.message.answer(
-        "<b>Шаг 6/13.</b> Выбери <b>1–3 приоритетные мышечные группы</b>, которые хочешь накачать в первую очередь:",
+        "<b>Шаг 6/14.</b> Выбери <b>1–3 приоритетные мышечные группы</b>, которые хочешь накачать в первую очередь:",
         reply_markup=build_muscles_kb([]),
     )
 
@@ -1213,7 +1469,7 @@ async def onb_muscles(call: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(Onboarding.level)
         await call.answer()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=l, callback_data=f"onb_lvl:{k}")] for k, l in LEVEL_NAMES.items()])
-        await call.message.answer("<b>Шаг 7/13.</b> Выбери уровень сложности тренировок:", reply_markup=kb)
+        await call.message.answer("<b>Шаг 7/14.</b> Выбери уровень сложности тренировок:", reply_markup=kb)
         return
 
     if val in selected:
@@ -1234,7 +1490,7 @@ async def onb_level(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(level=call.data.split(":", 1)[1], equipment=[])
     await state.set_state(Onboarding.equipment)
     await call.answer()
-    await call.message.answer("<b>Шаг 8/13.</b> Выбери инвентарь / места тренировок (можно несколько):", reply_markup=build_equip_kb([]))
+    await call.message.answer("<b>Шаг 8/14.</b> Выбери инвентарь / места тренировок (можно несколько):", reply_markup=build_equip_kb([]))
 
 
 @router.callback_query(Onboarding.equipment, F.data.startswith("onb_eq:"))
@@ -1250,7 +1506,7 @@ async def onb_equipment(call: CallbackQuery, state: FSMContext) -> None:
         await state.update_data(training_days=[])
         await state.set_state(Onboarding.training_days)
         await call.answer()
-        await call.message.answer("<b>Шаг 9/13.</b> Отметь дни недели, в которые ты ОБЯЗАН тренироваться:", reply_markup=build_days_kb([]))
+        await call.message.answer("<b>Шаг 9/14.</b> Отметь дни недели, в которые ты ОБЯЗАН тренироваться:", reply_markup=build_days_kb([]))
         return
 
     if val in selected:
@@ -1281,7 +1537,7 @@ async def onb_days(call: CallbackQuery, state: FSMContext) -> None:
                 [InlineKeyboardButton(text="60 мин", callback_data="onb_dur:60"), InlineKeyboardButton(text="90 мин", callback_data="onb_dur:90")],
             ]
         )
-        await call.message.answer("<b>Шаг 10/13.</b> Длительность одной тренировки:", reply_markup=kb)
+        await call.message.answer("<b>Шаг 10/14.</b> Длительность одной тренировки:", reply_markup=kb)
         return
 
     d = int(val)
@@ -1296,7 +1552,7 @@ async def onb_duration(call: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(duration=int(call.data.split(":", 1)[1]), injuries=[])
     await state.set_state(Onboarding.injuries)
     await call.answer()
-    await call.message.answer("<b>Шаг 11/13.</b> Есть ли травмы или проблемные зоны?", reply_markup=build_injuries_kb([]))
+    await call.message.answer("<b>Шаг 11/14.</b> Есть ли травмы или проблемные зоны?", reply_markup=build_injuries_kb([]))
 
 
 @router.callback_query(Onboarding.injuries, F.data.startswith("onb_inj:"))
@@ -1309,7 +1565,7 @@ async def onb_injuries(call: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(Onboarding.timezone)
         await call.answer()
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=l, callback_data=f"onb_tz:{k}")] for k, l in TIMEZONE_OPTIONS])
-        await call.message.answer("<b>Шаг 12/13.</b> Выбери свой часовой пояс (для уведомлений в 09:00 и 20:00):", reply_markup=kb)
+        await call.message.answer("<b>Шаг 12/14.</b> Выбери свой часовой пояс (для уведомлений в 09:00 и 20:00):", reply_markup=kb)
         return
 
     if val == "none":
@@ -1331,37 +1587,155 @@ async def onb_timezone(call: CallbackQuery, state: FSMContext) -> None:
         inline_keyboard=[[InlineKeyboardButton(text="⏭ Пропустить этот шаг", callback_data="onb_story:skip")]]
     )
     await call.message.answer(
-        "<b>Шаг 13/13 (По желанию). Личный стимул и топливо для мотивации 🔥</b>\n\n"
+        "<b>Шаг 13/14 (По желанию). Личный стимул и топливо для мотивации 🔥</b>\n\n"
         "Напиши одним сообщением: <b>о себе, ради чего или кого ты пашешь, кому хочешь утереть нос или кого боишься подвести / потерять</b>.\n\n"
         "Система сама проанализирует твои слова, подберет лучший психологический рычаг и добавит кнопку <b>«🔥 Мотивация»</b>.",
         reply_markup=kb,
     )
 
 
-async def finish_onboarding(target_msg: Message, user_id: int, state: FSMContext, story: str) -> None:
-    data = await state.get_data()
-    data["personal_story"] = story.strip()
-    save_profile(user_id, data)
-    profile = get_profile(user_id)
-    await state.clear()
+async def prompt_onboarding_photos(target_msg: Message, state: FSMContext, story: str) -> None:
+    await state.update_data(personal_story=story.strip(), photo_file_ids=[])
+    await state.set_state(Onboarding.body_photos)
     await target_msg.answer(
-        "✅ <b>Анкета принята! Сплит, периодизация, КБЖУ и рабочие объемы рассчитаны.</b>\n\n"
-        + format_profile_summary(profile)
-        + "\n\nНикаких оправданий — жми <b>«План на сегодня»</b> или открывай <b>Mini App</b>!",
-        reply_markup=main_menu_kb(profile),
+        "<b>Шаг 14/14 (По желанию). Сканирование формы тела по фото 📸</b>\n\n"
+        "Отправь <b>1–4 фотографии</b> своей текущей формы при хорошем освещении:\n"
+        "1️⃣ Спереди в полный рост\n"
+        "2️⃣ Сбоку (профиль осанки и талии)\n"
+        "3️⃣ Со спины (ширина спины и дельт)\n"
+        "4️⃣ Ноги (по желанию)\n\n"
+        "Я оценю процент жира, V-пропорции и отстающие мышцы, чтобы точно откалибровать объём тренировок и КБЖУ.\n"
+        "<i>Отправляй фото по одному или альбомом, а затем нажми кнопку ниже:</i>",
+        reply_markup=build_photo_step_kb(0, is_onboarding=True),
     )
 
 
 @router.callback_query(Onboarding.personal_story, F.data == "onb_story:skip")
 async def onb_story_skip(call: CallbackQuery, state: FSMContext) -> None:
     await call.answer("Пропущено")
-    await finish_onboarding(call.message, call.from_user.id, state, "")
+    await prompt_onboarding_photos(call.message, state, "")
 
 
 @router.message(Onboarding.personal_story)
 async def onb_story_text(message: Message, state: FSMContext) -> None:
     story = (message.text or "").strip()
-    await finish_onboarding(message, message.from_user.id, state, story)
+    await prompt_onboarding_photos(message, state, story)
+
+
+async def _download_tg_photos(bot: Bot, file_ids: list[str]) -> list[bytes]:
+    result = []
+    for fid in file_ids[:4]:
+        try:
+            tg_file = await bot.get_file(fid)
+            buf = io.BytesIO()
+            await bot.download_file(tg_file.file_path, destination=buf)
+            result.append(buf.getvalue())
+        except Exception as e:
+            logging.warning(f"Не удалось скачать фото {fid}: {e}")
+    return result
+
+
+@router.message(Onboarding.body_photos, F.photo)
+async def onb_photo_receive(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    fids: list[str] = list(data.get("photo_file_ids", []))
+    fids.append(message.photo[-1].file_id)
+    fids = fids[:4]
+    await state.update_data(photo_file_ids=fids)
+    await message.answer(
+        f"📸 Фото получено (<b>{len(fids)}/4</b>). Можешь прислать ещё ракурс или нажать «Готово»:",
+        reply_markup=build_photo_step_kb(len(fids), is_onboarding=True),
+    )
+
+
+@router.callback_query(Onboarding.body_photos, F.data.startswith("onb_photo:"))
+async def onb_photo_done(call: CallbackQuery, state: FSMContext) -> None:
+    action = call.data.split(":", 1)[1]
+    data = await state.get_data()
+    fids: list[str] = list(data.get("photo_file_ids", []))
+
+    save_profile(call.from_user.id, data)
+    profile = get_profile(call.from_user.id)
+
+    if action == "done" and fids:
+        await call.answer("Анализирую форму тела...")
+        await call.message.answer("⏳ <b>Сканирую пропорции, V-индекс и мышечный рельеф по фото...</b>")
+        raw_imgs = await _download_tg_photos(call.bot, fids)
+        analysis = analyze_body_photos(raw_imgs, profile)
+        save_body_analysis(call.from_user.id, analysis)
+        profile = get_profile(call.from_user.id)
+    else:
+        await call.answer("Готово!")
+
+    await state.clear()
+    await call.message.answer(
+        "✅ <b>Анкета принята! Идеальный сплит, периодизация, КБЖУ и рабочие объемы рассчитаны.</b>\n\n"
+        + format_profile_summary(profile)
+        + "\n\nНикаких оправданий — жми <b>«План на сегодня»</b> или открывай <b>Mini App</b>!",
+        reply_markup=main_menu_kb(profile),
+    )
+
+
+# ==================== ОТДЕЛЬНЫЙ ФОТО-АНАЛИЗ ИЗ МЕНЮ ====================
+
+@router.callback_query(F.data == "menu:bodyscan")
+async def cb_bodyscan_start(call: CallbackQuery, state: FSMContext) -> None:
+    profile = get_profile(call.from_user.id)
+    if not profile:
+        await call.answer("Сначала заполни анкету (/start)", show_alert=True)
+        return
+    await state.clear()
+    await state.set_state(BodyScanOnly.collecting_photos)
+    await state.update_data(photo_file_ids=[])
+    await call.answer()
+    await call.message.answer(
+        "📸 <b>АНАЛИЗ ФОРМЫ ТЕЛА ПО ФОТО</b>\n\n"
+        "Пришли <b>1–4 фотографии</b> своей актуальной формы (спереди, сбоку, со спины, ноги) при ровном освещении.\n"
+        "После разбора я сразу перестрою акценты и КБЖУ твоей программы под реальную картину:",
+        reply_markup=build_photo_step_kb(0, is_onboarding=False),
+    )
+
+
+@router.message(BodyScanOnly.collecting_photos, F.photo)
+async def scan_photo_receive(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    fids: list[str] = list(data.get("photo_file_ids", []))
+    fids.append(message.photo[-1].file_id)
+    fids = fids[:4]
+    await state.update_data(photo_file_ids=fids)
+    await message.answer(
+        f"📸 Принято ракурсов: <b>{len(fids)}/4</b>. Отправь ещё или жми «Готово»:",
+        reply_markup=build_photo_step_kb(len(fids), is_onboarding=False),
+    )
+
+
+@router.callback_query(BodyScanOnly.collecting_photos, F.data.startswith("scan_photo:"))
+async def scan_photo_finish(call: CallbackQuery, state: FSMContext) -> None:
+    action = call.data.split(":", 1)[1]
+    data = await state.get_data()
+    fids: list[str] = list(data.get("photo_file_ids", []))
+    await state.clear()
+
+    if action == "skip" or not fids:
+        await call.answer("Отменено")
+        await call.message.answer("Возвращаю в главное меню:", reply_markup=main_menu_kb())
+        return
+
+    await call.answer("Анализирую фото...")
+    await call.message.answer("⏳ <b>Провожу биометрический анализ фото и перестраиваю программу...</b>")
+    profile = get_profile(call.from_user.id)
+    raw_imgs = await _download_tg_photos(call.bot, fids)
+    analysis = analyze_body_photos(raw_imgs, profile)
+    save_body_analysis(call.from_user.id, analysis)
+    profile = get_profile(call.from_user.id)
+    nut = calculate_nutrition(profile)
+
+    await call.message.answer(
+        f"{analysis['verdict_html']}\n\n"
+        f"🥩 <b>Обновлённая норма КБЖУ:</b> <b>{nut['kcal']} ккал</b> (Б: {nut['protein']}г / Ж: {nut['fat']}г / У: {nut['carbs']}г)\n"
+        f"✅ Программа на сегодня уже пересобрана с учётом этих акцентов!",
+        reply_markup=main_menu_kb(profile),
+    )
 
 
 # ==================== ЛИЧНАЯ МОТИВАЦИЯ ====================
@@ -1725,7 +2099,7 @@ async def handle_api_state(request: web.Request) -> web.Response:
     plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode=mode)
     for ex in plan.get("exercises", []):
         if "rir" not in ex or "tempo" not in ex:
-            rx = get_coaching_prescription(ex, ex.get("is_priority", False), profile["goal"])
+            rx = get_coaching_prescription(ex, ex.get("is_priority", False), profile["goal"], ex.get("is_photo_lagging", False))
             ex.setdefault("rir", rx["rir"])
             ex.setdefault("tempo", rx["tempo"])
             ex.setdefault("role", rx["role"])
@@ -1864,6 +2238,30 @@ async def handle_api_motivate(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "message": build_personal_motivation(profile)})
 
 
+async def handle_api_analyze_photos(request: web.Request) -> web.Response:
+    profile = get_profile(ADMIN_TELEGRAM_ID)
+    if not profile:
+        return web.json_response({"ok": False, "message": "Сначала сохрани базовую анкету!"})
+    body = await request.json()
+    b64_list = body.get("photos", [])
+    raw_bytes = []
+    for item in b64_list[:4]:
+        s = str(item)
+        if "," in s:
+            s = s.split(",", 1)[1]
+        try:
+            raw_bytes.append(base64.b64decode(s))
+        except Exception:
+            pass
+
+    if not raw_bytes:
+        return web.json_response({"ok": False, "message": "Не удалось прочитать изображения."})
+
+    analysis = analyze_body_photos(raw_bytes, profile)
+    save_body_analysis(ADMIN_TELEGRAM_ID, analysis)
+    return web.json_response({"ok": True, "analysis": analysis})
+
+
 async def handle_api_bodyweight(request: web.Request) -> web.Response:
     body = await request.json()
     w = float(body.get("weight", 75.0))
@@ -1911,7 +2309,7 @@ async def main() -> None:
     dp.callback_query.middleware(AdminOnlyMiddleware())
     dp.include_router(router)
 
-    app = web.Application()
+    app = web.Application(client_max_size=25 * 1024 * 1024)
     app["bot"] = bot
     app.router.add_get("/", handle_index)
     app.router.add_get("/api/state", handle_api_state)
@@ -1920,6 +2318,7 @@ async def main() -> None:
     app.router.add_post("/api/finish_workout", handle_api_finish_workout)
     app.router.add_get("/api/excuse", handle_api_excuse)
     app.router.add_get("/api/motivate", handle_api_motivate)
+    app.router.add_post("/api/analyze_photos", handle_api_analyze_photos)
     app.router.add_post("/api/bodyweight", handle_api_bodyweight)
     app.router.add_post("/api/save_profile", handle_api_save_profile)
 

@@ -1628,6 +1628,7 @@ function renderWorkoutTab() {
       </div>
       <div class="hero-title">${plan.day_title}</div>
       <div class="hero-sub">${plan.split_name}</div>
+      ${plan.coach_note ? `<div style="margin-top:8px;font-size:11.5px;color:var(--cyan);font-weight:700;">${plan.coach_note}</div>` : ''}
       <div class="hero-quote">«${APP_STATE.quote}»</div>
     </div>
 
@@ -1700,7 +1701,7 @@ function renderWorkoutTab() {
         <div class="demo-stage" onclick="openExerciseModal(${idx})">
           <div class="demo-badge-tl">
             <span class="pill">${APP_STATE.muscle_names[ex.muscle] || ex.muscle}</span>
-            ${ex.is_priority ? `<span class="pill pill-prio">🎯 Акцент</span>` : ''}
+            ${ex.is_photo_lagging ? `<span class="pill" style="color:var(--cyan);border-color:rgba(56,189,248,0.45);">📸 По фото</span>` : (ex.is_priority ? `<span class="pill pill-prio">🎯 Акцент</span>` : '')}
             ${ex.logged_today ? `<span class="pill pill-done">✓ Сделано</span>` : ''}
           </div>
           ${getBiomechanicsSVG(ex)}
@@ -1978,6 +1979,13 @@ function renderProgressTab() {
       </div>
     </div>
 
+    ${p.body_analysis && p.body_analysis.verdict_html ? `
+      <div class="hero-card" style="border-color:rgba(56,189,248,0.35);">
+        <div class="hero-tag" style="color:var(--cyan);background:rgba(56,189,248,0.12);">📸 Сканирование формы тела</div>
+        <div style="font-size:12.5px;line-height:1.5;color:#e2e8f0;">${p.body_analysis.verdict_html.replace(/\n/g, '<br>')}</div>
+      </div>
+    ` : ''}
+
     <div class="hero-card">
       <div class="hero-title" style="font-size:15px;margin-bottom:10px;">⚖️ Обновить собственный вес тела</div>
       <div style="display:flex;gap:8px;">
@@ -2138,7 +2146,82 @@ function renderProfileTab(isFirstRun) {
         ✅ Сохранить и обновить программу
       </button>
     </div>
+
+    <div class="hero-card" style="border-color: rgba(56, 189, 248, 0.32);">
+      <div class="hero-tag" style="color:var(--cyan);background:rgba(56,189,248,0.12);">📸 По желанию • ИИ-разбор формы</div>
+      <div class="hero-title" style="font-size:16px;">Анализ тела и мышц по фото</div>
+      <div class="hero-sub" style="margin-bottom:12px;">
+        Загрузи 1–4 фото (спереди, сбоку, со спины, ноги). Тренер определит процент жира, V-пропорции и отстающие группы, чтобы точечно усилить программу и КБЖУ.
+      </div>
+      <input type="file" id="body-photos-input" accept="image/*" multiple style="display:none;" onchange="handleBodyPhotosUpload(this)">
+      <button class="btn btn-rest btn-full" id="photo-upload-btn" onclick="document.getElementById('body-photos-input').click()">
+        📷 Выбрать 1–4 фото и проанализировать
+      </button>
+      <div id="photo-verdict-box" style="margin-top:12px;font-size:12.5px;line-height:1.5;color:#e2e8f0;${p.body_analysis && p.body_analysis.verdict_html ? '' : 'display:none;'}">
+        ${p.body_analysis && p.body_analysis.verdict_html ? p.body_analysis.verdict_html.replace(/\n/g, '<br>') : ''}
+      </div>
+    </div>
   `;
+}
+
+function resizeImageToBase64(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 640;
+        let w = img.width, h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.8));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleBodyPhotosUpload(input) {
+  const files = Array.from(input.files || []).slice(0, 4);
+  if (!files.length) return;
+  const btn = document.getElementById('photo-upload-btn');
+  btn.innerText = '⏳ Сканирую пропорции и мышцы...';
+  btn.disabled = true;
+  haptic('light');
+
+  try {
+    const b64List = await Promise.all(files.map(resizeImageToBase64));
+    const res = await fetch('/api/analyze_photos', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ uid: USER_ID, photos: b64List })
+    });
+    const data = await res.json();
+    if (data.ok && data.analysis) {
+      const box = document.getElementById('photo-verdict-box');
+      box.style.display = 'block';
+      box.innerHTML = data.analysis.verdict_html.replace(/\n/g, '<br>');
+      showToast('📸 Анализ готов! Программа и КБЖУ перестроены под твою форму.', 4800);
+      haptic('success');
+      await fetchState();
+    } else {
+      showToast(data.message || '⚠️ Сначала сохрани основную анкету выше.');
+    }
+  } catch (e) {
+    showToast('⚠️ Ошибка при загрузке фото. Попробуй ещё раз.');
+  } finally {
+    btn.innerText = '📷 Выбрать 1–4 фото и проанализировать';
+    btn.disabled = false;
+    input.value = '';
+  }
 }
 
 function toggleArrayItem(field, val, maxLen, el) {
