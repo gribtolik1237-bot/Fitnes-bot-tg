@@ -510,12 +510,43 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+function formatVerdictCard(verdictHtml) {
+  if (!verdictHtml) return '';
+  const lines = verdictHtml.split('\n').map(l => l.trim()).filter(Boolean);
+  let header = '';
+  const items = [];
+  lines.forEach((line, idx) => {
+    if (idx === 0 && line.includes('ВЕРДИКТ')) {
+      header = `<div style="font-size:12px;font-weight:900;color:var(--cyan);margin-bottom:8px;letter-spacing:0.3px;">${line}</div>`;
+    } else {
+      const clean = line.replace(/^[•\-]\s*/, '');
+      items.push(`<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:12px;line-height:1.45;color:#e2e8f0;">${clean}</div>`);
+    }
+  });
+  return `${header}<div style="display:flex;flex-direction:column;gap:6px;">${items.join('')}</div>`;
+}
+
+function renderTimelineItems(timelineArr) {
+  if (!Array.isArray(timelineArr) || !timelineArr.length) return '';
+  return timelineArr.map((st, i) => `
+    <div style="background:var(--surface-2);border:1px solid var(--border);border-left:3px solid ${i === 3 ? 'var(--lime)' : 'var(--cyan)'};border-radius:12px;padding:10px 12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:4px;">
+        <span style="font-size:11px;font-weight:900;color:var(--lime);text-transform:uppercase;">${st.period}</span>
+        <span style="font-size:10px;font-weight:800;color:var(--cyan);background:rgba(56,189,248,0.12);padding:2px 7px;border-radius:6px;">${st.sessions}</span>
+      </div>
+      <div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:3px;">${st.title}</div>
+      <div style="font-size:12px;line-height:1.45;color:#cbd5e1;">${st.desc}</div>
+    </div>
+  `).join('');
+}
+
 let APP_STATE = null;
 let timerInterval = null;
 let timerRemaining = 0;
 let timerTotal = 90;
 let autoTimerEnabled = true;
 let warmupOpen = false;
+let timelineOpen = false;
 const forceShowWeight = new Set();
 
 const DEFAULT_EQUIP_NAMES = {
@@ -714,7 +745,6 @@ function getBiomechanicsSVG(ex) {
         <animate attributeName="cx" values="226;220;226" dur="2.4s" repeatCount="indefinite"/>
         <animate attributeName="cy" values="116;86;116" dur="2.4s" repeatCount="indefinite"/>
       </circle>
-      <text x="160" y="153" fill="${cyan}" font-size="9.5" font-weight="800" text-anchor="middle">ЛЁЖА НА ЖИВОТЕ • СВЕДИ ЛОПАТКИ ВВЕРХУ (2 СЕК)</text>
     </svg>`;
   }
 
@@ -736,7 +766,6 @@ function getBiomechanicsSVG(ex) {
       <circle cx="222" cy="122" r="9.5" fill="${headCol}">
         <animate attributeName="cy" values="122;96;122" dur="2.3s" repeatCount="indefinite"/>
       </circle>
-      <text x="160" y="153" fill="${cyan}" font-size="9.5" font-weight="800" text-anchor="middle">УПОР ЛОКТЯМИ В ПОЛ • ПРОЖМИ ЛОПАТКИ</text>
     </svg>`;
   }
 
@@ -832,46 +861,44 @@ function getBiomechanicsSVG(ex) {
         <animate attributeName="cy" values="42;68;42" dur="2.4s" repeatCount="indefinite"/>
       </circle>
       <circle cx="158" cy="84" r="5" fill="${lime}"/>
-      <text x="90" y="156" fill="${cyan}" font-size="9.5" font-weight="800" text-anchor="middle">${isChest ? 'НАКЛОН 30° • ЛОКОТЬ 90°' : 'КОРПУС РОВНО • ТРИЦЕПС'}</text>
     </svg>`;
   }
 
-  // ---------- 5. ОТЖИМАНИЯ «ДОМИКОМ» В ПЛЕЧИ (sh_pike_pushups) ----------
+  // ---------- 5. АРМЕЙСКИЕ ОТЖИМАНИЯ СО СМЕЩЕНИЕМ ПЛЕЧ ВПЕРЕД (sh_pike_pushups) ----------
   if (id === 'sh_pike_pushups') {
     return `<svg viewBox="0 0 320 162" fill="none">
       <line x1="20" y1="136" x2="300" y2="136" stroke="${floorCol}" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="236" cy="136" r="3.5" fill="${cyan}"/>
-      <circle cx="68" cy="133" r="4.5" fill="${headCol}"/>
-      <line x1="68" y1="133" x2="136" y2="48" stroke="${darkLimb}" stroke-width="10" stroke-linecap="round">
-        <animate attributeName="x2" values="136;144;136" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="48;56;48" dur="2.4s" repeatCount="indefinite"/>
+      <!-- Вертикальный ориентир выноса плеч вперед за линию кистей -->
+      <line x1="184" y1="62" x2="184" y2="134" stroke="${cyan}" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.45"/>
+      <!-- Стопы на опоре (62, 131) -->
+      <circle cx="62" cy="131" r="4.5" fill="${headCol}"/>
+      <!-- Корпус и ноги одной мощной линией от стоп (62,131) к вынесенному вперед плечу (214, 80 -> 110) -->
+      <line x1="62" y1="131" x2="214" y2="80" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round">
+        <animate attributeName="y2" values="80;110;80" dur="2.3s" repeatCount="indefinite"/>
       </line>
-      <line x1="136" y1="48" x2="196" y2="86" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round">
-        <animate attributeName="x1" values="136;144;136" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y1" values="48;56;48" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="x2" values="196;218;196" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="86;108;86" dur="2.4s" repeatCount="indefinite"/>
+      <!-- Предплечье от кисти (184,132 — под низом груди/поясом) к локтю (178,104 -> 166,112) -->
+      <line x1="184" y1="132" x2="178" y2="104" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
+        <animate attributeName="x2" values="178;166;178" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="104;112;104" dur="2.3s" repeatCount="indefinite"/>
       </line>
-      <line x1="206" y1="133" x2="202" y2="108" stroke="${limbCol}" stroke-width="6.5" stroke-linecap="round">
-        <animate attributeName="x2" values="202;214;202" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="108;112;108" dur="2.4s" repeatCount="indefinite"/>
+      <!-- Плечевая кость со светящимся акцентом от локтя к вынесенному вперед плечу (214, 80 -> 110) -->
+      <line x1="178" y1="104" x2="214" y2="80" stroke="${lime}" stroke-width="7.5" stroke-linecap="round" class="muscle-glow">
+        <animate attributeName="x1" values="178;166;178" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y1" values="104;112;104" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="y2" values="80;110;80" dur="2.3s" repeatCount="indefinite"/>
       </line>
-      <line x1="202" y1="108" x2="196" y2="86" stroke="${lime}" stroke-width="7.5" stroke-linecap="round" class="muscle-glow">
-        <animate attributeName="x1" values="202;214;202" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y1" values="108;112;108" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="x2" values="196;218;196" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="y2" values="86;108;86" dur="2.4s" repeatCount="indefinite"/>
-      </line>
-      <circle cx="196" cy="86" r="7" fill="${lime}" class="muscle-glow">
-        <animate attributeName="cx" values="196;218;196" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="cy" values="86;108;86" dur="2.4s" repeatCount="indefinite"/>
+      <!-- Шарнир локтя, крупная светящаяся дельта на плече и голова -->
+      <circle cx="178" cy="104" r="3.5" fill="${headCol}">
+        <animate attributeName="cx" values="178;166;178" dur="2.3s" repeatCount="indefinite"/>
+        <animate attributeName="cy" values="104;112;104" dur="2.3s" repeatCount="indefinite"/>
       </circle>
-      <circle cx="214" cy="96" r="9" fill="${headCol}">
-        <animate attributeName="cx" values="214;234;214" dur="2.4s" repeatCount="indefinite"/>
-        <animate attributeName="cy" values="96;122;96" dur="2.4s" repeatCount="indefinite"/>
+      <circle cx="214" cy="80" r="8" fill="${lime}" class="muscle-glow">
+        <animate attributeName="cy" values="80;110;80" dur="2.3s" repeatCount="indefinite"/>
       </circle>
-      <circle cx="206" cy="133" r="5" fill="${lime}"/>
-      <text x="115" y="153" fill="${cyan}" font-size="9.5" font-weight="800" text-anchor="middle">ТАЗ ВВЕРХ • МАКУШКОЙ ВПЕРЕД ЗА ЛАДОНИ</text>
+      <circle cx="235" cy="75" r="9.5" fill="${headCol}">
+        <animate attributeName="cy" values="75;106;75" dur="2.3s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="184" cy="132" r="5" fill="${lime}"/>
     </svg>`;
   }
 
@@ -945,7 +972,6 @@ function getBiomechanicsSVG(ex) {
         <animate attributeName="cy" values="105;112;105" dur="2.3s" repeatCount="indefinite"/>
       </circle>
       <circle cx="214" cy="132" r="5" fill="${lime}"/>
-      <text x="112" y="153" fill="${cyan}" font-size="9.5" font-weight="800" text-anchor="middle">${isDiamond ? 'АЛМАЗНЫЙ ХВАТ • ТРИЦЕПС' : (isDecline ? 'НОГИ НА ОПОРЕ • ВЕРХ ГРУДИ' : 'КОРПУС СТРУНОЙ • ГРУДЬ К ПОЛУ')}</text>
     </svg>`;
   }
 
@@ -1004,7 +1030,6 @@ function getBiomechanicsSVG(ex) {
         <line x1="65" y1="130" x2="216" y2="100" stroke="${torsoCol}" stroke-width="12" stroke-linecap="round"/>
         <line x1="124" y1="118" x2="180" y2="107" stroke="${lime}" stroke-width="12" stroke-linecap="round" class="muscle-glow"/>
         <circle cx="238" cy="93" r="9.5" fill="${headCol}"/>
-        <text x="115" y="153" fill="${cyan}" font-size="9.5" font-weight="800" text-anchor="middle">ТАЗ ПОДКРУЧЕН • ПРЕСС В СТАТИКЕ</text>
       </svg>`;
     }
     if (id === 'abs_cable_crunch') {
@@ -1478,7 +1503,6 @@ function getBiomechanicsSVG(ex) {
       <line x1="124" y1="58" x2="124" y2="92" stroke="${torsoCol}" stroke-width="11" stroke-linecap="round"/>
       <line x1="124" y1="92" x2="170" y2="92" stroke="${lime}" stroke-width="11" stroke-linecap="round" class="muscle-glow"/>
       <line x1="170" y1="92" x2="170" y2="132" stroke="${limbCol}" stroke-width="9" stroke-linecap="round"/>
-      <text x="115" y="153" fill="${cyan}" font-size="9.5" font-weight="800" text-anchor="middle">УГОЛ В КОЛЕНЯХ 90° • СПИНА К СТЕНЕ</text>
     </svg>`;
   }
 
@@ -1765,6 +1789,20 @@ function renderWorkoutTab() {
         </div>
       ` : ''}
     </div>
+
+    ${APP_STATE.timeline && APP_STATE.timeline.length ? `
+    <div class="warmup-card" style="border-color: rgba(163, 230, 53, 0.28);">
+      <div class="warmup-hdr" style="color: var(--lime);" onclick="timelineOpen=!timelineOpen;haptic('selection');renderWorkoutTab();">
+        <span>🚀 Когда ты станешь сильнее: прогноз по срокам</span>
+        <span>${timelineOpen ? '▲' : '▼'}</span>
+      </div>
+      ${timelineOpen ? `
+        <div class="warmup-list">
+          ${renderTimelineItems(APP_STATE.timeline)}
+        </div>
+      ` : ''}
+    </div>
+    ` : ''}
   `;
 
   plan.exercises.forEach((ex, idx) => {
@@ -1900,7 +1938,7 @@ async function submitExercise(idx, isBW, restSec) {
       startRestTimer(restSec);
     }
     showToast(data.message, 4500);
-    fetchState();
+    fetchState(); // v10 final
   }
 }
 
@@ -1913,7 +1951,7 @@ async function swapExercise(idx) {
   });
   const data = await res.json();
   showToast(data.message);
-  if (data.ok) fetchState();
+  if (data.ok) fetchState(); // v10 final
 }
 
 async function finishWorkoutSession() {
@@ -1926,7 +1964,7 @@ async function finishWorkoutSession() {
   stopTimer();
   showToast(data.message, 5000);
   haptic('success');
-  fetchState();
+  fetchState(); // v10 final
 }
 
 function renderTimersTab() {
@@ -2091,7 +2129,7 @@ function renderProgressTab() {
     ${p.body_analysis && p.body_analysis.verdict_html ? `
       <div class="hero-card" style="border-color:rgba(56,189,248,0.35);">
         <div class="hero-tag" style="color:var(--cyan);background:rgba(56,189,248,0.12);">📸 Сканирование формы тела</div>
-        <div style="font-size:12.5px;line-height:1.5;color:#e2e8f0;">${p.body_analysis.verdict_html.replace(/\n/g, '<br>')}</div>
+        <div style="font-size:12.5px;line-height:1.5;color:#e2e8f0;">${formatVerdictCard(p.body_analysis.verdict_html)}</div>
       </div>
     ` : ''}
 
@@ -2102,6 +2140,16 @@ function renderProgressTab() {
         <button class="btn btn-lime" onclick="saveNewBodyWeight()">Записать</button>
       </div>
     </div>
+
+    ${APP_STATE.timeline && APP_STATE.timeline.length ? `
+      <div class="hero-card" style="border-color:rgba(163,230,53,0.32);">
+        <div class="hero-tag">🚀 Прогноз при соблюдении режима</div>
+        <div class="hero-title" style="font-size:15px;margin-bottom:10px;">Сроки роста твоей силы и формы</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${renderTimelineItems(APP_STATE.timeline)}
+        </div>
+      </div>
+    ` : ''}
 
     <div class="hero-card">
       <div class="hero-title" style="font-size:15px;margin-bottom:6px;">📈 Журнал прогрессии</div>
@@ -2121,7 +2169,7 @@ async function saveNewBodyWeight() {
   const data = await res.json();
   showToast(data.message);
   haptic('success');
-  fetchState();
+  fetchState(); // v10 final
 }
 
 function selectSingleChip(field, val, el) {
@@ -2267,7 +2315,7 @@ function renderProfileTab(isFirstRun) {
         📷 Выбрать 1–4 фото и проанализировать
       </button>
       <div id="photo-verdict-box" style="margin-top:12px;font-size:12.5px;line-height:1.5;color:#e2e8f0;${p.body_analysis && p.body_analysis.verdict_html ? '' : 'display:none;'}">
-        ${p.body_analysis && p.body_analysis.verdict_html ? p.body_analysis.verdict_html.replace(/\n/g, '<br>') : ''}
+        ${p.body_analysis && p.body_analysis.verdict_html ? formatVerdictCard(p.body_analysis.verdict_html) : ''}
       </div>
     </div>
   `;
@@ -2317,10 +2365,10 @@ async function handleBodyPhotosUpload(input) {
     if (data.ok && data.analysis) {
       const box = document.getElementById('photo-verdict-box');
       box.style.display = 'block';
-      box.innerHTML = data.analysis.verdict_html.replace(/\n/g, '<br>');
+      box.innerHTML = formatVerdictCard(data.analysis.verdict_html);
       showToast('📸 Анализ готов! Программа и КБЖУ перестроены под твою форму.', 4800);
       haptic('success');
-      await fetchState();
+      await fetchState(); // v10 final
     } else {
       showToast(data.message || '⚠️ Сначала сохрани основную анкету выше.');
     }
@@ -2382,12 +2430,12 @@ async function saveProfileForm() {
   if (data.ok) {
     showToast('✅ Профиль и личный стимул сохранены! Программа обновлена.');
     haptic('success');
-    await fetchState();
+    await fetchState(); // v10 final
     switchTab('workout', document.querySelectorAll('.nav-btn')[0]);
   }
 }
 
-fetchState();
+fetchState(); // v10 final
 </script>
 </body>
 </html>

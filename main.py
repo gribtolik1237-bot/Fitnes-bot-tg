@@ -177,62 +177,140 @@ def now_iso(profile: dict | None = None) -> str:
 # ==================== АНАЛИЗАТОР ФОРМЫ ТЕЛА ПО ФОТО (CV + АНТРОПОМЕТРИЯ) ====================
 
 def _extract_image_metrics(img_bytes: bytes) -> dict:
-    """Извлекает пропорции силуэта, ширину плеч/талии/бедер и рельефность (контраст теней) из фото."""
+    """
+    Реальное компьютерное зрение (CV):
+    1) Определяет цвет и яркость фона по краям кадра.
+    2) Выделяет маску силуэта человека (bounding box фигуры).
+    3) Замеряет реальную пиксельную ширину 4 анатомических поясов:
+       - плечевой пояс (20–30% высоты фигуры)
+       - грудной отдел / широчайшие (31–42% высоты фигуры)
+       - талия и живот (45–55% высоты фигуры)
+       - бедра / квадрицепсы (60–76% высоты фигуры)
+    4) Вычисляет градиентную резкость мышечного рельефа (Sobel-контраст теней внутри торса).
+    """
     if not HAS_PIL:
-        return {"contrast": 48.0, "shoulder_waist_ratio": 1.32, "upper_lower_ratio": 1.05}
+        return {
+            "contrast": 48.0,
+            "relief_score": 58,
+            "shoulder_waist_ratio": 1.31,
+            "chest_waist_ratio": 1.18,
+            "upper_lower_ratio": 1.06,
+            "fill_density": 0.42,
+        }
     try:
         im = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        im.thumbnail((240, 320))
+        im.thumbnail((260, 340))
         w, h = im.size
         gray = im.convert("L")
-
-        # Центральная область тела (20%..80% ширины, 15%..88% высоты)
-        torso_crop = gray.crop((int(w * 0.22), int(h * 0.18), int(w * 0.78), int(h * 0.62)))
-        stat = ImageStat.Stat(torso_crop)
-        contrast = float(stat.stddev[0])  # Выше стандартное отклонение яркости = глубже мышечные тени/сепарация
-
-        # Оценка ширины силуэта по горизонтальным поясам (плечи, талия, бедра) через градиент краев
         px = gray.load()
-        row_widths = []
-        for y in range(int(h * 0.15), int(h * 0.88)):
-            bg_l = px[2, y]
-            bg_r = px[w - 3, y]
-            left_x, right_x = int(w * 0.25), int(w * 0.75)
-            for x in range(4, w // 2):
-                if abs(px[x, y] - bg_l) > 26:
+        rgb_px = im.load()
+
+        # 1. Оцениваем фон по левому и правому краям кадра на каждой высоте
+        fg_rows = []
+        active_y_indices = []
+        for y in range(int(h * 0.08), int(h * 0.92)):
+            bg_l_r, bg_l_g, bg_l_b = rgb_px[2, y]
+            bg_r_r, bg_r_g, bg_r_b = rgb_px[w - 3, y]
+
+            left_x = None
+            for x in range(4, int(w * 0.75)):
+                r, g, b = rgb_px[x, y]
+                dist = abs(r - bg_l_r) + abs(g - bg_l_g) + abs(b - bg_l_b)
+                if dist > 48:
                     left_x = x
                     break
-            for x in range(w - 5, w // 2, -1):
-                if abs(px[x, y] - bg_r) > 26:
+
+            right_x = None
+            for x in range(w - 5, int(w * 0.25), -1):
+                r, g, b = rgb_px[x, y]
+                dist = abs(r - bg_r_r) + abs(g - bg_r_g) + abs(b - bg_r_b)
+                if dist > 48:
                     right_x = x
                     break
-            span = max(10, right_x - left_x)
-            row_widths.append((y / h, span))
 
-        def avg_span(y1: float, y2: float) -> float:
-            vals = [s for yr, s in row_widths if y1 <= yr <= y2]
-            return sum(vals) / len(vals) if vals else 50.0
+            if left_x is not None and right_x is not None and right_x - left_x >= int(w * 0.12):
+                span = right_x - left_x
+                fg_rows.append((y, left_x, right_x, span))
+                active_y_indices.append(y)
 
-        shoulders_w = avg_span(0.20, 0.30)
-        waist_w = avg_span(0.42, 0.52)
-        legs_w = avg_span(0.58, 0.75)
+        if len(fg_rows) < 15:
+            # Если фон сложный/неоднородный, используем градиент яркости от вертикальной оси тела
+            fg_rows = []
+            for y in range(int(h * 0.14), int(h * 0.88)):
+                row_vals = [px[x, y] for x in range(w)]
+                mean_v = sum(row_vals) / max(1, w)
+                active_xs = [x for x in range(int(w * 0.12), int(w * 0.88)) if abs(px[x, y] - mean_v) > 16]
+                if len(active_xs) >= 10:
+                    lx, rx = min(active_xs), max(active_xs)
+                    fg_rows.append((y, lx, rx, max(12, rx - lx)))
 
-        sw_ratio = max(1.05, min(1.75, shoulders_w / max(1.0, waist_w)))
-        ul_ratio = max(0.75, min(1.45, shoulders_w / max(1.0, legs_w)))
+        min_y = fg_rows[0][0] if fg_rows else int(h * 0.14)
+        max_y = fg_rows[-1][0] if fg_rows else int(h * 0.88)
+        body_h = max(30, max_y - min_y)
+
+        def band_width(r1: float, r2: float) -> float:
+            spans = [span for (y, _, _, span) in fg_rows if r1 <= (y - min_y) / body_h <= r2]
+            if not spans:
+                return w * 0.36
+            spans.sort()
+            # Берем медиану + верхний квартиль для устойчивости к положению рук
+            mid = len(spans) // 2
+            return float(sum(spans[max(0, mid - 2): min(len(spans), mid + 3)]) / max(1, len(spans[max(0, mid - 2): min(len(spans), mid + 3)])))
+
+        sh_w = band_width(0.18, 0.29)
+        ch_w = band_width(0.30, 0.42)
+        wa_w = band_width(0.45, 0.56)
+        lg_w = band_width(0.60, 0.78)
+
+        # Нормализуем анатомические коэффициенты по реальным замерам силуэта
+        sw_ratio = max(1.06, min(1.72, sh_w / max(10.0, wa_w)))
+        cw_ratio = max(1.02, min(1.55, ch_w / max(10.0, wa_w)))
+        ul_ratio = max(0.76, min(1.42, sh_w / max(10.0, lg_w)))
+        fill_density = max(0.20, min(0.75, ch_w / max(1.0, w)))
+
+        # 2. Считаем градиентную резкость мышечных граней (Sobel edge energy внутри торса)
+        tx1, ty1 = int(w * 0.26), int(min_y + body_h * 0.20)
+        tx2, ty2 = int(w * 0.74), int(min_y + body_h * 0.58)
+        edge_sum = 0.0
+        edge_cnt = 0
+        for y in range(max(1, ty1), min(h - 1, ty2)):
+            for x in range(max(1, tx1), min(w - 1, tx2)):
+                gx = abs(int(px[x + 1, y]) - int(px[x - 1, y]))
+                gy = abs(int(px[x, y + 1]) - int(px[x, y - 1]))
+                edge_sum += (gx + gy) * 0.5
+                edge_cnt += 1
+        mean_edge = edge_sum / max(1, edge_cnt)
+
+        torso_crop = gray.crop((max(0, tx1), max(0, ty1), min(w, tx2), min(h, ty2)))
+        contrast = float(ImageStat.Stat(torso_crop).stddev[0]) if torso_crop.size[0] > 2 and torso_crop.size[1] > 2 else 45.0
+
+        # Индекс прорисовки мышц (0..100) на основе микроконтраста граней и общего светотеневого контраста
+        relief_score = int(round(max(25, min(96, (mean_edge * 2.1) + (contrast * 0.55)))))
+
         return {
             "contrast": round(contrast, 1),
+            "relief_score": relief_score,
             "shoulder_waist_ratio": round(sw_ratio, 2),
+            "chest_waist_ratio": round(cw_ratio, 2),
             "upper_lower_ratio": round(ul_ratio, 2),
+            "fill_density": round(fill_density, 2),
         }
     except Exception as exc:
         logging.warning(f"CV image parse fallback: {exc}")
-        return {"contrast": 48.0, "shoulder_waist_ratio": 1.32, "upper_lower_ratio": 1.05}
+        return {
+            "contrast": 48.0,
+            "relief_score": 58,
+            "shoulder_waist_ratio": 1.31,
+            "chest_waist_ratio": 1.18,
+            "upper_lower_ratio": 1.06,
+            "fill_density": 0.42,
+        }
 
 
 def analyze_body_photos(photo_bytes_list: list[bytes], profile: dict, prev_metrics: list[dict] | None = None) -> dict:
     """
-    Комплексный тренерский разбор формы по 1–4 фотографиям (спереди, сбоку, со спины, ноги)
-    с учетом роста, веса, пола, возраста и цели атлета.
+    Реальный биометрический разбор по фото (CV-сканирование пропорций силуэта, V-индекса,
+    плотности торса и градиента рельефа) + сопоставление с антропометрией атлета.
     """
     w = float(profile.get("weight", 75))
     h_cm = int(profile.get("height", 178))
@@ -243,23 +321,25 @@ def analyze_body_photos(photo_bytes_list: list[bytes], profile: dict, prev_metri
 
     metrics = prev_metrics if prev_metrics else [_extract_image_metrics(b) for b in photo_bytes_list if b]
     photos_cnt = len(photo_bytes_list) if photo_bytes_list else (len(metrics) if metrics else 2)
-    avg_contrast = sum(m["contrast"] for m in metrics) / len(metrics) if metrics else 48.0
-    avg_sw = sum(m["shoulder_waist_ratio"] for m in metrics) / len(metrics) if metrics else 1.32
-    avg_ul = sum(m["upper_lower_ratio"] for m in metrics) / len(metrics) if metrics else 1.05
+
+    avg_contrast = sum(m.get("contrast", 48.0) for m in metrics) / len(metrics) if metrics else 48.0
+    avg_relief = int(round(sum(m.get("relief_score", 58) for m in metrics) / len(metrics))) if metrics else 58
+    avg_sw = round(sum(m.get("shoulder_waist_ratio", 1.31) for m in metrics) / len(metrics), 2) if metrics else 1.31
+    avg_cw = round(sum(m.get("chest_waist_ratio", 1.18) for m in metrics) / len(metrics), 2) if metrics else 1.18
+    avg_ul = round(sum(m.get("upper_lower_ratio", 1.06) for m in metrics) / len(metrics), 2) if metrics else 1.06
 
     sex_bit = 1 if is_male else 0
     raw_bf = (1.20 * bmi) + (0.23 * age) - (10.8 * sex_bit) - 5.4
-    relief_adj = (48.0 - avg_contrast) * 0.12
-    v_taper_adj = (1.32 - avg_sw) * 6.0
-    est_bf = round(max(9.5 if is_male else 15.0, min(36.0, raw_bf + relief_adj + v_taper_adj)), 1)
+    relief_adj = (56.0 - avg_relief) * 0.08
+    v_taper_adj = (1.32 - avg_sw) * 5.5
+    est_bf = round(max(9.2 if is_male else 15.0, min(36.0, raw_bf + relief_adj + v_taper_adj)), 1)
 
-    # Логичная классификация кондиции с учетом ИМТ и процента жира (без противоречий!)
     if bmi < 18.5:
-        condition = "Эктоморфный сухой каркас (дефицит мышечной массы, тонкая прослойка — идеальная база для набора)"
+        condition = "Эктоморфный сухой каркас (высокая чувствительность к росту от базовых упражнений)"
         kcal_factor = 1.18
     elif is_male:
         if est_bf <= 13.5:
-            condition = "Сухая атлетичная форма (выраженный рельеф и сепарация)"
+            condition = "Сухая атлетичная форма (выраженный мышечный рельеф)"
             kcal_factor = 1.14
         elif est_bf <= 18.0:
             condition = "Сбалансированная спортивная форма (оптимально для чистого набора)"
@@ -284,30 +364,32 @@ def analyze_body_photos(photo_bytes_list: list[bytes], profile: dict, prev_metri
     lagging_muscles = []
     notes = []
 
-    if bmi < 19.5:
-        lagging_muscles.extend(["chest", "back", "shoulders"])
-        notes.append("• <b>Верхний плечевой пояс и грудная клетка:</b> главный упор на базовые многосуставные тяги и отжимания/жимы для расширения костяка и набора плотной мышечной массы.")
-        notes.append("• <b>Ширина плеч (V-силуэт):</b> прицельная проработка средних дельт и широчайших мышц спины визуально сделает торс мощнее уже в первые 6–8 недель.")
-        if avg_ul > 1.06:
-            lagging_muscles.append("quads")
-            notes.append("• <b>Ноги (в день Низа):</b> базовые приседания и румынская тяга дадут мощный гормональный отклик для общего роста массы тела.")
+    # Точная диагностика по реальным пиксельным индексам фото:
+    # 1) Анализ V-силуэта (плечи к талии)
+    if avg_sw < 1.33:
+        lagging_muscles.extend(["shoulders", "back"])
+        notes.append(f"• <b>Замер V-индекса (плечи/талия): {avg_sw:.2f}</b> (атлетический эталон: <b>1.45+</b>) — плечевой пояс и широчайшие требуют приоритетного расширения.")
     else:
-        if avg_sw < 1.29:
-            lagging_muscles.extend(["shoulders", "back"])
-            notes.append("• <b>V-силуэт (плечи и широчайшие):</b> нужно расширить верх спины и средние дельты, чтобы визуально сузить талию.")
-        else:
-            lagging_muscles.append("chest")
-            notes.append("• <b>Верхний плечевой пояс:</b> хорошая ширина костяка — делаем акцент на толщину грудных и детализацию дельт.")
+        notes.append(f"• <b>Замер V-индекса (плечи/талия): {avg_sw:.2f}</b> — отличная базовая ширина костяка, упор на мышечную толщину.")
 
-        if avg_ul > 1.08:
-            lagging_muscles.extend(["quads", "hamstrings"])
-            notes.append("• <b>Ноги и задняя цепь:</b> нижняя часть тела уступает верху — в дни Низа добавляем прицельный объем на квадрицепсы и бицепс бедра.")
-        else:
-            notes.append("• <b>Баланс верх/низ:</b> пропорции ног и корпуса гармоничные, сохраняем силовой прогресс в базе.")
+    # 2) Анализ плотности грудной клетки и верха корпуса (chest_waist_ratio + BMI)
+    if avg_cw < 1.22 or bmi < 19.5:
+        if "chest" not in lagging_muscles:
+            lagging_muscles.insert(0, "chest")
+        notes.append(f"• <b>Индекс наполненности торса: {avg_cw:.2f}</b> — не хватает мышечного объёма грудных и верха спины; в программу поставлены тяжелые отжимания на брусьях и тяги.")
+    else:
+        notes.append(f"• <b>Индекс наполненности торса: {avg_cw:.2f}</b> — хороший объём грудного отдела, добавляем детальную проработку углов.")
 
-        if est_bf >= (19.0 if is_male else 26.0):
-            lagging_muscles.append("abs")
-            notes.append("• <b>Кор и талия:</b> добавляем регулярную силовую работу на пресс и сокращаем паузы отдыха.")
+    # 3) Анализ баланса Верх / Низ и рельефа кора
+    if avg_ul > 1.09:
+        if "quads" not in lagging_muscles:
+            lagging_muscles.append("quads")
+        notes.append(f"• <b>Баланс Верх/Низ по силуэту: {avg_ul:.2f}</b> — ноги визуально уступают плечевому поясу, усилен день Низа.")
+    else:
+        notes.append(f"• <b>Оценка мышечной сепарации (рельеф): {avg_relief}/100</b> — {'четкая прорисовка при низком % жира, главная задача — профицит калорий и рабочий тоннаж' if est_bf < 15 else 'хорошая плотность, держим чистое питание и прогрессию весов'}.")
+
+    if est_bf >= (19.0 if is_male else 26.0) and "abs" not in lagging_muscles:
+        lagging_muscles.append("abs")
 
     unique_lagging = []
     for m in lagging_muscles:
@@ -317,10 +399,10 @@ def analyze_body_photos(photo_bytes_list: list[bytes], profile: dict, prev_metri
 
     lagging_names = ", ".join(MUSCLE_NAMES[m] for m in unique_lagging)
     coach_verdict = (
-        f"📸 <b>ВЕРДИКТ ТРЕНЕРА ПО ФОТО ({photos_cnt} ракурс.):</b>\n"
+        f"📸 <b>БИОМЕТРИЧЕСКИЙ СКАН ФОРМЫ ({photos_cnt} фото):</b>\n"
         f"• Тип сложения: <b>{condition}</b>\n"
-        f"• Жировая прослойка: <b>~{est_bf}%</b> (ИМТ: <b>{bmi:.1f}</b>)\n"
-        f"• Точки роста по фото: <b>{lagging_names}</b>\n"
+        f"• Жировая прослойка: <b>~{est_bf}%</b> | ИМТ: <b>{bmi:.1f}</b> | Рельеф: <b>{avg_relief}/100</b>\n"
+        f"• Точки прицельного роста: <b>{lagging_names}</b>\n"
         + "\n".join(notes)
     )
 
@@ -329,12 +411,107 @@ def analyze_body_photos(photo_bytes_list: list[bytes], profile: dict, prev_metri
         "raw_metrics": metrics,
         "est_bf": est_bf,
         "bmi": round(bmi, 1),
+        "v_ratio": avg_sw,
+        "chest_ratio": avg_cw,
+        "relief_score": avg_relief,
         "condition": condition,
         "lagging_muscles": unique_lagging,
         "kcal_factor": kcal_factor,
         "verdict_html": coach_verdict,
         "updated_at": now_iso(profile),
     }
+
+
+def build_strength_timeline(profile: dict, plan: dict | None = None) -> list[dict]:
+    """
+    Рассчитывает персональный прогноз роста силы, повторений/весов и мышечной массы
+    на 2, 4, 8 и 12 недель при соблюдении программы без пропусков.
+    """
+    w = float(profile.get("weight", 75))
+    h_cm = int(profile.get("height", 178))
+    bmi = w / ((h_cm / 100.0) ** 2)
+    goal = profile.get("goal", "mass")
+    days_per_wk = len(profile.get("training_days", [0, 2, 4]))
+
+    if plan is None:
+        try:
+            plan = get_or_create_today_workout(int(profile.get("user_id", ADMIN_TELEGRAM_ID)), mode="regular")
+        except Exception:
+            plan = None
+
+    def _fmt_ex_prog(ex_obj: dict | None, default_name: str, default_reps: int) -> tuple[str, str, str, str]:
+        if not ex_obj:
+            return default_name, f"{default_reps + 2} повт.", f"{default_reps + 4} повт.", f"{default_reps + 7} повт."
+        short_name = ex_obj["name"].split("(")[0].replace("[Суперсет A]", "").replace("[Суперсет B]", "").strip()
+        tw = float(ex_obj.get("target_weight", 0.0))
+        tr = int(ex_obj.get("target_reps", default_reps))
+        if ex_obj.get("is_timed"):
+            return short_name, f"{tr + 10} сек", f"{tr + 20} сек", f"{tr + 35} сек"
+        if tw > 0:
+            step = 2.5 if ex_obj.get("is_compound", True) else 1.5
+            return (
+                short_name,
+                f"{tw + step:g} кг × {tr} повт.",
+                f"{tw + step * 2:g} кг × {tr} повт.",
+                f"{tw + step * 4:g} кг × {tr} повт.",
+            )
+        return short_name, f"{tr + 2} повт.", f"{tr + 4} повт.", f"{tr + 7} повт."
+
+    exs = plan.get("exercises", []) if isinstance(plan, dict) else []
+    ex1_name, ex1_w2, ex1_w4, ex1_w8 = _fmt_ex_prog(exs[0] if len(exs) >= 1 else None, "Отжимания на брусьях", 9)
+    ex2_name, ex2_w2, ex2_w4, ex2_w8 = _fmt_ex_prog(exs[1] if len(exs) >= 2 else None, "Подтягивания к груди", 7)
+
+    if goal == "cut":
+        w4_mass = "−1.5…−2.2 кг жира (прорисовка пресса и дельт)"
+        w8_mass = "−3.0…−4.2 кг жира (глубокий рельеф без потери мышц)"
+        w12_mass = "Сухая атлетичная форма (−5+ кг жира, жёсткий мышечный каркас)"
+    else:
+        gain_mult = 1.15 if bmi < 19.5 else 1.0
+        m4 = round(1.2 * gain_mult, 1)
+        m8 = round(2.6 * gain_mult, 1)
+        m12 = round(4.2 * gain_mult, 1)
+        w4_mass = f"+{m4} кг чистой мышечной массы (плотность в груди, плечах и руках)"
+        w8_mass = f"+{m8} кг мышц (заметное расширение плеч и спины в футболке)"
+        w12_mass = f"+{m12} кг сухой массы (полная смена силового уровня и пропорций)"
+
+    return [
+        {
+            "period": "Через 2 недели",
+            "sessions": f"{days_per_wk * 2} тренировок",
+            "title": "⚡ Нейромышечный прорыв и рост рабочих показателей",
+            "desc": (
+                f"ЦНС адаптируется к нагрузке, техника станет жёсткой. Сила вырастет на <b>+15–20%</b>: "
+                f"«{ex1_name}» выйдет на <b>{ex1_w2}</b>, а «{ex2_name}» — на <b>{ex2_w2}</b> во всех подходах."
+            ),
+        },
+        {
+            "period": "Через 4 недели (1 месяц)",
+            "sessions": f"{days_per_wk * 4} тренировок",
+            "title": "💪 Первая видимая гипертрофия и наполненность мышц",
+            "desc": (
+                f"Результат на весах и в зеркале: <b>{w4_mass}</b>. Рабочие показатели вырастут до "
+                f"<b>{ex1_w4}</b> и <b>{ex2_w4}</b> (+30–35% к стартовой силе)."
+            ),
+        },
+        {
+            "period": "Через 8 недель (2 месяца)",
+            "sessions": f"{days_per_wk * 8} тренировок",
+            "title": "🦁 Визуальное изменение V-силуэта и +50% к силе",
+            "desc": (
+                f"Прогресс заметит окружение: <b>{w8_mass}</b>. Выход на <b>{ex1_w8}</b> и <b>{ex2_w8}</b> "
+                f"либо переход на работу с дополнительным отягощением."
+            ),
+        },
+        {
+            "period": "Через 12 недель (3 месяца)",
+            "sessions": f"{days_per_wk * 12} тренировок",
+            "title": "🏆 Полная трансформация каркаса и доминирующая форма",
+            "desc": (
+                f"Итог железной дисциплины: <b>{w12_mass}</b>. Удвоение стартового тоннажа, мощная спина, "
+                f"широкие дельты и стальной кор."
+            ),
+        },
+    ]
 
 
 def save_body_analysis(user_id: int, analysis: dict) -> None:
@@ -607,6 +784,16 @@ def determine_split(profile: dict) -> tuple[str, list[dict]]:
 def filter_exercises(profile: dict, muscle: str) -> list[dict]:
     equip_set = set(normalize_equipment(profile["equipment"]))
     injuries = set(profile["injuries"])
+    non_bw_equip = equip_set - {"bodyweight"}
+
+    # Если у атлета выбран зал, турники/брусья или гантели — в первую очередь берем упражнения с этим снаряжением, а не суррогаты на полу!
+    if non_bw_equip:
+        preferred = [
+            ex for ex in EXERCISES
+            if ex["muscle"] == muscle and non_bw_equip.intersection(ex["equip"]) and not injuries.intersection(ex["exclude_injuries"])
+        ]
+        if len(preferred) >= 2:
+            return preferred
 
     valid = [
         ex for ex in EXERCISES
@@ -747,6 +934,12 @@ def build_regular_workout(profile: dict) -> dict:
     used_ids = set()
     total_time = 180
 
+    # Считаем, в который раз за недельный цикл сплита встречается каждая мышца (0 для Верх А / Низ А, 1 для Верх Б / Низ Б)
+    muscle_occurrence = {}
+    for prev_d in range(day_idx):
+        for pm in split_days[prev_d]["muscles"]:
+            muscle_occurrence[pm] = muscle_occurrence.get(pm, 0) + 1
+
     # ПРОХОД 1: По 1 лучшему упражнению на каждую целевую группу дня (строго не менее 3 подходов!)
     for muscle in ordered_muscles:
         if len(selected_exercises) >= max_ex_count:
@@ -757,7 +950,14 @@ def build_regular_workout(profile: dict) -> dict:
         is_lagging = muscle in photo_lagging
 
         pool = compounds if (compounds and muscle in big_muscles) else candidates
-        ex = pool[(rotation_cycle + day_idx) % len(pool)]
+        # Исключаем дублирование двух ягодичных мостиков подряд в одной тренировке Низа
+        has_bridge = any("bridge" in uid or "thrust" in uid for uid in used_ids)
+        if has_bridge:
+            non_bridge_pool = [c for c in pool if "bridge" not in c["id"] and "thrust" not in c["id"]]
+            if non_bridge_pool:
+                pool = non_bridge_pool
+        occ = muscle_occurrence.get(muscle, 0)
+        ex = pool[(rotation_cycle + occ) % len(pool)]
         if ex["id"] in used_ids:
             ex = next((c for c in candidates if c["id"] not in used_ids), ex)
         if ex["id"] in used_ids:
@@ -811,7 +1011,8 @@ def build_regular_workout(profile: dict) -> dict:
         if not second_pool:
             continue
 
-        ex2 = second_pool[(rotation_cycle + day_idx) % len(second_pool)]
+        occ = muscle_occurrence.get(muscle, 0)
+        ex2 = second_pool[(rotation_cycle + occ) % len(second_pool)]
         sets = 3
         rest_sec = max(35, min(90, int(round((ex2["rest_sec"] * rest_mult) / 5.0) * 5)))
         est_ex_time = sets * (35 + rest_sec) + 30
@@ -1231,6 +1432,11 @@ def format_progress_report(profile: dict) -> str:
         logs_str = ", ".join(f"{l['date']} ({'экспресс' if l['workout_type']=='express' else 'база'})" for l in recent_logs)
         lines.append(f"\n🗓 <b>Последние тренировки:</b> {logs_str}")
 
+    tl = build_strength_timeline(profile)
+    lines.append("\n🚀 <b>ПРОГНОЗ РОСТА СИЛЫ И ФОРМЫ (БЕЗ ПРОПУСКОВ):</b>")
+    for step in tl:
+        lines.append(f"• <b>{step['period']} ({step['sessions']}):</b> {step['desc']}")
+
     return "\n".join(lines)
 
 
@@ -1302,16 +1508,16 @@ class BodyWeightFlow(StatesGroup):
 
 def get_webapp_url(req: web.Request | None = None) -> str:
     if WEBAPP_PUBLIC_URL:
-        return f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}"
+        return f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}&v=9"
     if req is not None:
         host = req.headers.get("X-Forwarded-Host") or req.host
-        return f"https://{host}/?uid={ADMIN_TELEGRAM_ID}"
+        return f"https://{host}/?uid={ADMIN_TELEGRAM_ID}&v=9"
     for env_key in ("BOTHOST_DOMAIN", "DOMAIN", "APP_URL", "PUBLIC_URL", "RENDER_EXTERNAL_URL"):
         val = os.getenv(env_key, "").strip().rstrip("/")
         if val:
             if not val.startswith("http"):
                 val = f"https://{val}"
-            return f"{val}/?uid={ADMIN_TELEGRAM_ID}"
+            return f"{val}/?uid={ADMIN_TELEGRAM_ID}&v=9"
     return ""
 
 
@@ -1480,7 +1686,7 @@ async def cmd_set_domain(message: Message) -> None:
     try:
         await message.bot.set_chat_menu_button(
             chat_id=ADMIN_TELEGRAM_ID,
-            menu_button=MenuButtonWebApp(text="📱 Тренер App", web_app=WebAppInfo(url=f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}")),
+            menu_button=MenuButtonWebApp(text="📱 Тренер App", web_app=WebAppInfo(url=f"{WEBAPP_PUBLIC_URL}/?uid={ADMIN_TELEGRAM_ID}&v=9")),
         )
     except Exception:
         pass
@@ -2220,9 +2426,17 @@ async def handle_api_state(request: web.Request) -> web.Response:
 
     plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode=mode)
     ba_lag = set(profile["body_analysis"].get("lagging_muscles", [])) if isinstance(profile.get("body_analysis"), dict) else set()
+    plan_changed = False
     for ex in plan.get("exercises", []):
+        if ex.get("id") == "sh_pike_pushups" and "Домиком" in str(ex.get("name", "")):
+            db_ex = EXERCISE_MAP.get("sh_pike_pushups")
+            if db_ex:
+                ex["name"] = db_ex["name"]
+                ex["cues"] = db_ex["cues"]
+                plan_changed = True
         if plan.get("workout_type") == "regular" and int(ex.get("sets", 3)) < 3:
             ex["sets"] = 3
+            plan_changed = True
         if ex.get("muscle") in ba_lag:
             ex["is_photo_lagging"] = True
             ex["is_priority"] = True
@@ -2230,6 +2444,8 @@ async def handle_api_state(request: web.Request) -> web.Response:
         ex["rir"] = rx["rir"]
         ex["tempo"] = rx["tempo"]
         ex["role"] = rx["role"]
+    if plan_changed:
+        save_active_plan(ADMIN_TELEGRAM_ID, plan, profile)
 
     split_name, _ = determine_split(profile)
     nut = calculate_nutrition(profile)
@@ -2269,6 +2485,7 @@ async def handle_api_state(request: web.Request) -> web.Response:
         "plan": plan,
         "quote": random.choice(MORNING_QUOTES),
         "personal_motivation": build_personal_motivation(profile),
+        "timeline": build_strength_timeline(profile, plan),
         "progress": {"total_workouts": total_workouts, "items": prog_items},
         "muscle_names": MUSCLE_NAMES,
         "weekday_names": WEEKDAY_NAMES,
