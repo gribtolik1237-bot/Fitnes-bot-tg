@@ -229,7 +229,7 @@ def _extract_image_metrics(img_bytes: bytes) -> dict:
         return {"contrast": 48.0, "shoulder_waist_ratio": 1.32, "upper_lower_ratio": 1.05}
 
 
-def analyze_body_photos(photo_bytes_list: list[bytes], profile: dict) -> dict:
+def analyze_body_photos(photo_bytes_list: list[bytes], profile: dict, prev_metrics: list[dict] | None = None) -> dict:
     """
     Комплексный тренерский разбор формы по 1–4 фотографиям (спереди, сбоку, со спины, ноги)
     с учетом роста, веса, пола, возраста и цели атлета.
@@ -241,84 +241,92 @@ def analyze_body_photos(photo_bytes_list: list[bytes], profile: dict) -> dict:
     is_male = profile.get("gender", "Мужской") == "Мужской"
     bmi = w / (h_m * h_m)
 
-    metrics = [_extract_image_metrics(b) for b in photo_bytes_list if b]
+    metrics = prev_metrics if prev_metrics else [_extract_image_metrics(b) for b in photo_bytes_list if b]
+    photos_cnt = len(photo_bytes_list) if photo_bytes_list else (len(metrics) if metrics else 2)
     avg_contrast = sum(m["contrast"] for m in metrics) / len(metrics) if metrics else 48.0
     avg_sw = sum(m["shoulder_waist_ratio"] for m in metrics) / len(metrics) if metrics else 1.32
     avg_ul = sum(m["upper_lower_ratio"] for m in metrics) / len(metrics) if metrics else 1.05
 
-    # Оценка процента подкожного жира по формуле Деуренберга + коррекция по визуальному рельефу и V-индексу
     sex_bit = 1 if is_male else 0
     raw_bf = (1.20 * bmi) + (0.23 * age) - (10.8 * sex_bit) - 5.4
-    relief_adj = (48.0 - avg_contrast) * 0.14  # Хорошая мышечная сепарация снижает оценку жира
-    v_taper_adj = (1.32 - avg_sw) * 8.0
-    est_bf = round(max(6.5 if is_male else 13.0, min(38.0, raw_bf + relief_adj + v_taper_adj)), 1)
+    relief_adj = (48.0 - avg_contrast) * 0.12
+    v_taper_adj = (1.32 - avg_sw) * 6.0
+    est_bf = round(max(9.5 if is_male else 15.0, min(36.0, raw_bf + relief_adj + v_taper_adj)), 1)
 
-    # Определение соматотипа и текущей кондиции
-    if is_male:
-        if est_bf <= 12.5:
-            condition = "Сухая атлетичная форма (высокая детализация мышц)"
-            kcal_factor = 1.15
-        elif est_bf <= 17.5:
+    # Логичная классификация кондиции с учетом ИМТ и процента жира (без противоречий!)
+    if bmi < 18.5:
+        condition = "Эктоморфный сухой каркас (дефицит мышечной массы, тонкая прослойка — идеальная база для набора)"
+        kcal_factor = 1.18
+    elif is_male:
+        if est_bf <= 13.5:
+            condition = "Сухая атлетичная форма (выраженный рельеф и сепарация)"
+            kcal_factor = 1.14
+        elif est_bf <= 18.0:
             condition = "Сбалансированная спортивная форма (оптимально для чистого набора)"
             kcal_factor = 1.08
         elif est_bf <= 22.5:
-            condition = "Умеренный процент жира (нужна рекомпозиция: рост мышц + контроль талии)"
+            condition = "Умеренный процент жира (рекомпозиция: рост мышц + контроль талии)"
             kcal_factor = 0.96
         else:
-            condition = "Повышенный процент жира (в приоритете сушка и плотный метаболический тренинг)"
+            condition = "Повышенный процент жира (акцент на рельеф и плотный темп)"
             kcal_factor = 0.85
     else:
-        if est_bf <= 19.0:
+        if est_bf <= 19.5:
             condition = "Подтянутая рельефная форма"
             kcal_factor = 1.12
         elif est_bf <= 25.0:
             condition = "Сбалансированная форма (идеально для тонуса и пропорций)"
             kcal_factor = 1.04
         else:
-            condition = "Повышенный процент жира (акцент на жиросжигание и сохранение мышц)"
+            condition = "Повышенный процент жира (акцент на рельеф и сохранение мышц)"
             kcal_factor = 0.86
 
-    # Выявление отстающих мышечных групп по пропорциям фото и ИМТ
     lagging_muscles = []
     notes = []
 
-    if avg_sw < 1.28:
-        lagging_muscles.extend(["shoulders", "back"])
-        notes.append("• <b>V-силуэт (плечи и широчайшие):</b> нужно расширить верх спины и средние дельты, чтобы визуально сузить талию.")
+    if bmi < 19.5:
+        lagging_muscles.extend(["chest", "back", "shoulders"])
+        notes.append("• <b>Верхний плечевой пояс и грудная клетка:</b> главный упор на базовые многосуставные тяги и отжимания/жимы для расширения костяка и набора плотной мышечной массы.")
+        notes.append("• <b>Ширина плеч (V-силуэт):</b> прицельная проработка средних дельт и широчайших мышц спины визуально сделает торс мощнее уже в первые 6–8 недель.")
+        if avg_ul > 1.06:
+            lagging_muscles.append("quads")
+            notes.append("• <b>Ноги (в день Низа):</b> базовые приседания и румынская тяга дадут мощный гормональный отклик для общего роста массы тела.")
     else:
-        notes.append("• <b>Верхний плечевой пояс:</b> хорошая ширина костяка — делаем акцент на наполненность грудных и дельт.")
+        if avg_sw < 1.29:
+            lagging_muscles.extend(["shoulders", "back"])
+            notes.append("• <b>V-силуэт (плечи и широчайшие):</b> нужно расширить верх спины и средние дельты, чтобы визуально сузить талию.")
+        else:
+            lagging_muscles.append("chest")
+            notes.append("• <b>Верхний плечевой пояс:</b> хорошая ширина костяка — делаем акцент на толщину грудных и детализацию дельт.")
 
-    if avg_ul > 1.08 or bmi < 21.5:
-        lagging_muscles.extend(["quads", "hamstrings"])
-        notes.append("• <b>Ноги и задняя цепь:</b> нижняя часть тела уступает верху — добавляем прицельный объем на квадрицепсы и бицепс бедра.")
-    else:
-        notes.append("• <b>Баланс верх/низ:</b> пропорции ног и корпуса гармоничные, сохраняем силовой прогресс в базе.")
+        if avg_ul > 1.08:
+            lagging_muscles.extend(["quads", "hamstrings"])
+            notes.append("• <b>Ноги и задняя цепь:</b> нижняя часть тела уступает верху — в дни Низа добавляем прицельный объем на квадрицепсы и бицепс бедра.")
+        else:
+            notes.append("• <b>Баланс верх/низ:</b> пропорции ног и корпуса гармоничные, сохраняем силовой прогресс в базе.")
 
-    if bmi < 20.5:
-        lagging_muscles.append("chest")
-        notes.append("• <b>Общая мышечная масса:</b> дефицит мышечного каркаса — фокус на тяжелые базовые жимы и тяги в 6–10 повторениях.")
-    elif est_bf >= (19.0 if is_male else 26.0):
-        lagging_muscles.append("abs")
-        notes.append("• <b>Кор и талия:</b> добавляем регулярную силовую работу на пресс и сокращаем паузы отдыха для расхода калорий.")
+        if est_bf >= (19.0 if is_male else 26.0):
+            lagging_muscles.append("abs")
+            notes.append("• <b>Кор и талия:</b> добавляем регулярную силовую работу на пресс и сокращаем паузы отдыха.")
 
-    # Убираем дубли, оставляем до 3 ключевых зон
     unique_lagging = []
     for m in lagging_muscles:
         if m not in unique_lagging:
             unique_lagging.append(m)
-    unique_lagging = unique_lagging[:3] or ["chest", "back"]
+    unique_lagging = unique_lagging[:3] or ["chest", "back", "shoulders"]
 
     lagging_names = ", ".join(MUSCLE_NAMES[m] for m in unique_lagging)
     coach_verdict = (
-        f"📸 <b>ВЕРДИКТ ТРЕНЕРА ПО ФОТО ({len(photo_bytes_list)} ракурс.):</b>\n"
-        f"• Текущая кондиция: <b>{condition}</b>\n"
-        f"• Оценка жировой прослойки: <b>~{est_bf}%</b> (ИМТ: {bmi:.1f})\n"
-        f"• Приоритет коррекции по фото: <b>{lagging_names}</b>\n"
+        f"📸 <b>ВЕРДИКТ ТРЕНЕРА ПО ФОТО ({photos_cnt} ракурс.):</b>\n"
+        f"• Тип сложения: <b>{condition}</b>\n"
+        f"• Жировая прослойка: <b>~{est_bf}%</b> (ИМТ: <b>{bmi:.1f}</b>)\n"
+        f"• Точки роста по фото: <b>{lagging_names}</b>\n"
         + "\n".join(notes)
     )
 
     return {
-        "photos_count": len(photo_bytes_list),
+        "photos_count": photos_cnt,
+        "raw_metrics": metrics,
         "est_bf": est_bf,
         "bmi": round(bmi, 1),
         "condition": condition,
@@ -335,7 +343,6 @@ def save_body_analysis(user_id: int, analysis: dict) -> None:
             "UPDATE user_profile SET body_analysis = ? WHERE user_id = ?",
             (json.dumps(analysis, ensure_ascii=False), user_id),
         )
-        # Сбрасываем активный план на сегодня, чтобы программа мгновенно перестроилась под фото!
         conn.execute("DELETE FROM active_workouts WHERE user_id = ?", (user_id,))
 
 
@@ -349,9 +356,9 @@ def detect_motivation_archetype(story: str) -> str:
         "предал", "измен", "люб", "отношен", "потерял ее", "потерять ее", "пожалел", "кусала локти",
     )
     prove_kw = (
-        "доказат", "утереть", "нос", "не вер", "смеял", "сомневал", "враг", "соперник",
-        "конкурент", "завист", "говорил", "называ", "обзыв", "дразн", "одноклассн", "класс",
-        "слабак", "унизил", "лучше всех", "сильнее", "самым сильн", "переплюн", "заткн", "дрищ", "дрыщ",
+        "доказат", "утереть", "нос", "не вер", "смеял", "смеют", "сомневал", "враг", "соперник",
+        "конкурент", "завист", "говорил", "говорят", "называ", "обзыв", "дразн", "одноклассн",
+        "слабак", "унизил", "лучше всех", "самым сильн", "переплюн", "заткн",
     )
     duty_kw = (
         "семь", "мать", "мам", "отц", "пап", "родит", "сын", "доч", "дет", "брат",
@@ -359,13 +366,13 @@ def detect_motivation_archetype(story: str) -> str:
     )
     self_kw = (
         "лен", "жир", "пуз", "дрищ", "дрыщ", "худой", "слаб", "комплекс", "стыд", "зеркал",
-        "устал быть", "ненавиж", "дисциплин", "характер", "для себя", "самоуважен", "уверенн",
+        "перестать быть", "устал быть", "ненавиж", "дисциплин", "характер", "для себя", "самоуважен", "уверенн", "стать сильн",
     )
 
     scores = {
-        "heartbreak_revenge": sum(2 for kw in heartbreak_kw if kw in s),
-        "prove_them_wrong": sum(2 for kw in prove_kw if kw in s),
-        "protector_duty": sum(2 for kw in duty_kw if kw in s),
+        "heartbreak_revenge": sum(3 for kw in heartbreak_kw if kw in s),
+        "prove_them_wrong": sum(3 for kw in prove_kw if kw in s),
+        "protector_duty": sum(3 for kw in duty_kw if kw in s),
         "self_conquest": sum(2 for kw in self_kw if kw in s),
     }
 
@@ -376,25 +383,26 @@ def detect_motivation_archetype(story: str) -> str:
 
 
 def build_personal_motivation(profile: dict | None) -> str:
-    story = (profile.get("personal_story") or "").strip() if profile else ""
+    raw_story = (profile.get("personal_story") or "").strip() if profile else ""
+    clean_story = raw_story.rstrip(".!?; ")
     goal_txt = GOAL_NAMES.get(profile["goal"], "Мощная форма") if profile else "Мощная форма"
     muscles_txt = ", ".join(MUSCLE_NAMES.get(m, m) for m in profile.get("priority_muscles", [])) if profile else ""
 
-    if not story:
+    if not clean_story:
         return (
             f"🔥 <b>ТВОЯ ЦЕЛЬ — {goal_txt.upper()}!</b>\n"
             f"Акцент: <b>{muscles_txt}</b>.\n\n"
             f"{random.choice(MORNING_QUOTES)}"
         )
 
-    archetype = detect_motivation_archetype(story)
+    archetype = detect_motivation_archetype(clean_story)
     pack = ADAPTIVE_MOTIVATION_PACKS.get(archetype, ADAPTIVE_MOTIVATION_PACKS["hardcore_default"])
 
     with get_conn() as conn:
         total_w = conn.execute("SELECT COUNT(*) AS cnt FROM workout_logs").fetchone()["cnt"]
         deload_cnt = conn.execute("SELECT COUNT(*) AS cnt FROM exercise_progress WHERE fail_streak >= 1").fetchone()["cnt"]
 
-    base_msg = random.choice(pack["templates"]).format(story=html.escape(story))
+    base_msg = random.choice(pack["templates"]).format(story=html.escape(clean_story))
 
     if deload_cnt > 0:
         context_line = f"⚡ <i>Внимание: в {deload_cnt} упр. был недобор повторений — сегодня закрываем долг на 100%!</i>"
@@ -491,6 +499,13 @@ def save_profile(user_id: int, data: dict) -> None:
             ),
         )
         conn.execute("DELETE FROM active_workouts WHERE user_id = ?", (user_id,))
+    if existing and isinstance(existing.get("body_analysis"), dict):
+        old_ba = existing["body_analysis"]
+        refreshed_prof = get_profile(user_id)
+        if refreshed_prof:
+            new_ba = analyze_body_photos([], refreshed_prof, prev_metrics=old_ba.get("raw_metrics"))
+            new_ba["photos_count"] = old_ba.get("photos_count", 2)
+            save_body_analysis(user_id, new_ba)
 
 
 def update_body_weight(user_id: int, new_weight: float) -> tuple[float, float]:
@@ -686,11 +701,21 @@ def build_regular_workout(profile: dict) -> dict:
 
     goal = profile["goal"]
     level = profile["level"]
-    max_seconds = profile["duration"] * 60
+    dur = int(profile.get("duration", 60))
+
+    # Точный лимит количества упражнений под выбранную длительность тренировки
+    if dur <= 30:
+        max_ex_count = 4
+    elif dur <= 45:
+        max_ex_count = 5
+    elif dur <= 60:
+        max_ex_count = 6
+    else:
+        max_ex_count = 7
 
     if level == "beginner":
         base_sets = 3
-        diff_rest_mult = 1.10
+        diff_rest_mult = 1.05
     elif level == "advanced":
         base_sets = 4
         diff_rest_mult = 0.90
@@ -699,13 +724,12 @@ def build_regular_workout(profile: dict) -> dict:
         diff_rest_mult = 1.0
 
     bf_rest_mult = 0.90 if (isinstance(ba, dict) and float(ba.get("est_bf", 15)) >= 20.0) else 1.0
-    goal_rest_mult = 1.20 if goal == "strength" else (0.80 if goal == "cut" else 1.0)
+    goal_rest_mult = 1.15 if goal == "strength" else (0.80 if goal == "cut" else 1.0)
     rest_mult = goal_rest_mult * diff_rest_mult * bf_rest_mult
 
     big_muscles = {"chest", "back", "quads", "hamstrings", "glutes"}
     day_muscles = list(day_template["muscles"])
-    # Если пресс выбран в приоритете (например Грудь + Спина + Пресс), гарантируем его включение в конец тренировки
-    if "abs" in effective_priority and "abs" not in day_muscles:
+    if "abs" in effective_priority and "abs" not in day_muscles and len(day_muscles) < max_ex_count:
         day_muscles.append("abs")
 
     ordered_muscles = sorted(
@@ -723,8 +747,10 @@ def build_regular_workout(profile: dict) -> dict:
     used_ids = set()
     total_time = 180
 
-    # ПРОХОД 1: Обязательно ставим по 1 лучшему упражнению на КАЖДУЮ мышечную группу дня сплита (без пропусков плеч и рук!)
+    # ПРОХОД 1: По 1 лучшему упражнению на каждую целевую группу дня (строго не менее 3 подходов!)
     for muscle in ordered_muscles:
+        if len(selected_exercises) >= max_ex_count:
+            break
         candidates = filter_exercises(profile, muscle)
         compounds = [c for c in candidates if c["is_compound"]]
         is_priority = muscle in effective_priority
@@ -737,16 +763,16 @@ def build_regular_workout(profile: dict) -> dict:
         if ex["id"] in used_ids:
             continue
 
-        # Базовые и приоритетные группы получают 4 подхода, изолирующие/малые группы — 3 подхода для идеального баланса времени
-        if muscle in big_muscles and is_priority:
-            sets = min(4 if profile["duration"] <= 45 else 5, base_sets + 1)
-        elif muscle in big_muscles:
-            sets = base_sets
+        # Профессиональный объём: минимум 3 подхода всегда; 4 подхода на базу/приоритеты/хардкор
+        if level == "advanced":
+            sets = 4 if (muscle in big_muscles or is_priority) else 3
+        elif level == "intermediate":
+            sets = 4 if (muscle in big_muscles and is_priority) else 3
         else:
-            sets = 3 if is_priority else max(2, base_sets - 1)
+            sets = 3
 
-        rest_sec = max(30, int(round((ex["rest_sec"] * rest_mult) / 5.0) * 5))
-        est_ex_time = sets * (35 + rest_sec) + 35
+        rest_sec = max(35, min(120 if dur <= 45 else 150, int(round((ex["rest_sec"] * rest_mult) / 5.0) * 5)))
+        est_ex_time = sets * (35 + rest_sec) + 30
 
         weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal, level)
         rx = get_coaching_prescription(ex, muscle in user_priority, goal, is_photo_lagging=is_lagging)
@@ -772,52 +798,49 @@ def build_regular_workout(profile: dict) -> dict:
         })
         total_time += est_ex_time
 
-    # ПРОХОД 2: Если длительность >= 60 мин и остаётся запас времени, добавляем 2-е упражнение под другим углом на главные приоритеты
-    if profile["duration"] >= 60:
-        for muscle in ordered_muscles:
-            if muscle not in effective_priority or muscle not in big_muscles:
-                continue
-            candidates = filter_exercises(profile, muscle)
-            isolations = [c for c in candidates if not c["is_compound"] and c["id"] not in used_ids]
-            fallback = [c for c in candidates if c["id"] not in used_ids]
-            second_pool = isolations if isolations else fallback
-            if not second_pool:
-                continue
+    # ПРОХОД 2: Если лимит упражнений (60–90 мин) позволяет, добавляем 2-е упражнение на главные приоритеты дня
+    for muscle in ordered_muscles:
+        if len(selected_exercises) >= max_ex_count:
+            break
+        if muscle not in effective_priority or muscle not in big_muscles:
+            continue
+        candidates = filter_exercises(profile, muscle)
+        isolations = [c for c in candidates if not c["is_compound"] and c["id"] not in used_ids]
+        fallback = [c for c in candidates if c["id"] not in used_ids]
+        second_pool = isolations if isolations else fallback
+        if not second_pool:
+            continue
 
-            ex2 = second_pool[(rotation_cycle + day_idx) % len(second_pool)]
-            sets = 3
-            rest_sec = max(30, int(round((ex2["rest_sec"] * rest_mult) / 5.0) * 5))
-            est_ex_time = sets * (35 + rest_sec) + 35
+        ex2 = second_pool[(rotation_cycle + day_idx) % len(second_pool)]
+        sets = 3
+        rest_sec = max(35, min(90, int(round((ex2["rest_sec"] * rest_mult) / 5.0) * 5)))
+        est_ex_time = sets * (35 + rest_sec) + 30
 
-            if total_time + est_ex_time > max_seconds:
-                break
+        is_lagging = muscle in photo_lagging
+        weight, t_reps, r_min, r_max = get_exercise_targets(ex2, goal, level)
+        rx = get_coaching_prescription(ex2, muscle in user_priority, goal, is_photo_lagging=is_lagging)
+        used_ids.add(ex2["id"])
+        selected_exercises.append({
+            "id": ex2["id"],
+            "name": ex2["name"],
+            "muscle": muscle,
+            "is_priority": True,
+            "is_photo_lagging": is_lagging,
+            "is_compound": ex2["is_compound"],
+            "is_timed": ex2.get("is_timed", False),
+            "sets": sets,
+            "target_weight": weight,
+            "target_reps": t_reps,
+            "rep_min": r_min,
+            "rep_max": r_max,
+            "rest_sec": rest_sec,
+            "cues": ex2["cues"],
+            "rir": rx["rir"],
+            "tempo": rx["tempo"],
+            "role": "🎯 Второй угол проработки приоритета",
+        })
+        total_time += est_ex_time
 
-            is_lagging = muscle in photo_lagging
-            weight, t_reps, r_min, r_max = get_exercise_targets(ex2, goal, level)
-            rx = get_coaching_prescription(ex2, muscle in user_priority, goal, is_photo_lagging=is_lagging)
-            used_ids.add(ex2["id"])
-            selected_exercises.append({
-                "id": ex2["id"],
-                "name": ex2["name"],
-                "muscle": muscle,
-                "is_priority": True,
-                "is_photo_lagging": is_lagging,
-                "is_compound": ex2["is_compound"],
-                "is_timed": ex2.get("is_timed", False),
-                "sets": sets,
-                "target_weight": weight,
-                "target_reps": t_reps,
-                "rep_min": r_min,
-                "rep_max": r_max,
-                "rest_sec": rest_sec,
-                "cues": ex2["cues"],
-                "rir": rx["rir"],
-                "tempo": rx["tempo"],
-                "role": "🎯 Второй угол проработки приоритета",
-            })
-            total_time += est_ex_time
-
-    # Порядок в тренировке: 1) Тяжелая база на крупные мышцы -> 2) База/проработка плеч и рук -> 3) Изоляция -> 4) Пресс в финале
     selected_exercises.sort(
         key=lambda x: (
             3 if x["muscle"] == "abs" else (
@@ -831,14 +854,22 @@ def build_regular_workout(profile: dict) -> dict:
 
     coach_note = ""
     if isinstance(ba, dict) and ba.get("lagging_muscles"):
-        l_names = ", ".join(MUSCLE_NAMES[m] for m in ba["lagging_muscles"] if m in MUSCLE_NAMES)
-        coach_note = f"📸 Учтён анализ фото (~{ba['est_bf']}% жира): добавлен приоритетный объём на {l_names}."
+        today_muscles_set = {x["muscle"] for x in selected_exercises}
+        today_lag = [MUSCLE_NAMES[m] for m in ba["lagging_muscles"] if m in today_muscles_set]
+        other_lag = [MUSCLE_NAMES[m] for m in ba["lagging_muscles"] if m not in today_muscles_set and m in MUSCLE_NAMES]
+        if today_lag and other_lag:
+            coach_note = f"📸 По фото (~{ba['est_bf']}% жира): сегодня усилены {', '.join(today_lag)} ({', '.join(other_lag)} — в день Низа)."
+        elif today_lag:
+            coach_note = f"📸 По фото (~{ba['est_bf']}% жира): в этой тренировке усилены {', '.join(today_lag)}."
+        else:
+            all_l = [MUSCLE_NAMES[m] for m in ba["lagging_muscles"] if m in MUSCLE_NAMES]
+            coach_note = f"📸 Анализ фото (~{ba['est_bf']}% жира): акцент в сплите на {', '.join(all_l)}."
 
     return {
         "workout_type": "regular",
         "split_name": split_name,
         "day_title": day_template["day_title"],
-        "est_minutes": max(25, round(total_time / 60)),
+        "est_minutes": max(20, round(total_time / 60)),
         "coach_note": coach_note,
         "exercises": selected_exercises,
     }
@@ -2179,13 +2210,26 @@ async def handle_api_state(request: web.Request) -> web.Response:
             "level_names": LEVEL_NAMES,
         })
 
+    # Авто-обновление диагноза фото, если в базе остался старый шаблон при низком ИМТ
+    ba_curr = profile.get("body_analysis")
+    if isinstance(ba_curr, dict) and float(ba_curr.get("bmi", 22)) < 18.5 and "Сухая атлетичная" in str(ba_curr.get("condition", "")):
+        upgraded_ba = analyze_body_photos([], profile, prev_metrics=ba_curr.get("raw_metrics"))
+        upgraded_ba["photos_count"] = ba_curr.get("photos_count", 2)
+        save_body_analysis(ADMIN_TELEGRAM_ID, upgraded_ba)
+        profile = get_profile(ADMIN_TELEGRAM_ID)
+
     plan = get_or_create_today_workout(ADMIN_TELEGRAM_ID, mode=mode)
+    ba_lag = set(profile["body_analysis"].get("lagging_muscles", [])) if isinstance(profile.get("body_analysis"), dict) else set()
     for ex in plan.get("exercises", []):
-        if "rir" not in ex or "tempo" not in ex:
-            rx = get_coaching_prescription(ex, ex.get("is_priority", False), profile["goal"], ex.get("is_photo_lagging", False))
-            ex.setdefault("rir", rx["rir"])
-            ex.setdefault("tempo", rx["tempo"])
-            ex.setdefault("role", rx["role"])
+        if plan.get("workout_type") == "regular" and int(ex.get("sets", 3)) < 3:
+            ex["sets"] = 3
+        if ex.get("muscle") in ba_lag:
+            ex["is_photo_lagging"] = True
+            ex["is_priority"] = True
+        rx = get_coaching_prescription(ex, ex.get("is_priority", False), profile["goal"], ex.get("is_photo_lagging", False))
+        ex["rir"] = rx["rir"]
+        ex["tempo"] = rx["tempo"]
+        ex["role"] = rx["role"]
 
     split_name, _ = determine_split(profile)
     nut = calculate_nutrition(profile)
