@@ -350,14 +350,15 @@ def detect_motivation_archetype(story: str) -> str:
     )
     prove_kw = (
         "доказат", "утереть", "нос", "не вер", "смеял", "сомневал", "враг", "соперник",
-        "конкурент", "завист", "говорил", "слабак", "унизил", "лучше всех", "переплюн", "заткн",
+        "конкурент", "завист", "говорил", "называ", "обзыв", "дразн", "одноклассн", "класс",
+        "слабак", "унизил", "лучше всех", "сильнее", "самым сильн", "переплюн", "заткн", "дрищ", "дрыщ",
     )
     duty_kw = (
         "семь", "мать", "мам", "отц", "пап", "родит", "сын", "доч", "дет", "брат",
         "защит", "опор", "не подвест", "гордил", "пример", "близк", "родн",
     )
     self_kw = (
-        "лен", "жир", "пуз", "дрыщ", "худой", "слаб", "комплекс", "стыд", "зеркал",
+        "лен", "жир", "пуз", "дрищ", "дрыщ", "худой", "слаб", "комплекс", "стыд", "зеркал",
         "устал быть", "ненавиж", "дисциплин", "характер", "для себя", "самоуважен", "уверенн",
     )
 
@@ -402,7 +403,7 @@ def build_personal_motivation(profile: dict | None) -> str:
     else:
         context_line = f"📌 <i>Цель: {goal_txt} • Главный удар на: {muscles_txt}.</i>"
 
-    return f"🧠 <b>Режим психологии: {pack['label']}</b>\n\n{base_msg}\n\n{context_line}"
+    return f"{base_msg}\n\n{context_line}"
 
 
 def calculate_nutrition(profile: dict) -> dict:
@@ -678,7 +679,6 @@ def build_regular_workout(profile: dict) -> dict:
     rotation_cycle = w_counter // len(split_days)
     day_template = split_days[day_idx]
 
-    # Объединяем приоритеты анкеты и отстающие зоны, выявленные на фото тела
     user_priority = set(profile["priority_muscles"])
     ba = profile.get("body_analysis")
     photo_lagging = set(ba.get("lagging_muscles", [])) if isinstance(ba, dict) else set()
@@ -698,14 +698,18 @@ def build_regular_workout(profile: dict) -> dict:
         base_sets = 3
         diff_rest_mult = 1.0
 
-    # Если по фото виден повышенный процент жира, чуть ускоряем темп тренировки
     bf_rest_mult = 0.90 if (isinstance(ba, dict) and float(ba.get("est_bf", 15)) >= 20.0) else 1.0
     goal_rest_mult = 1.20 if goal == "strength" else (0.80 if goal == "cut" else 1.0)
     rest_mult = goal_rest_mult * diff_rest_mult * bf_rest_mult
 
     big_muscles = {"chest", "back", "quads", "hamstrings", "glutes"}
+    day_muscles = list(day_template["muscles"])
+    # Если пресс выбран в приоритете (например Грудь + Спина + Пресс), гарантируем его включение в конец тренировки
+    if "abs" in effective_priority and "abs" not in day_muscles:
+        day_muscles.append("abs")
+
     ordered_muscles = sorted(
-        day_template["muscles"],
+        day_muscles,
         key=lambda m: (
             0 if (m in effective_priority and m in big_muscles) else (
                 1 if m in big_muscles else (
@@ -717,71 +721,110 @@ def build_regular_workout(profile: dict) -> dict:
 
     selected_exercises = []
     used_ids = set()
-    total_time = 240
+    total_time = 180
 
+    # ПРОХОД 1: Обязательно ставим по 1 лучшему упражнению на КАЖДУЮ мышечную группу дня сплита (без пропусков плеч и рук!)
     for muscle in ordered_muscles:
         candidates = filter_exercises(profile, muscle)
         compounds = [c for c in candidates if c["is_compound"]]
-        isolations = [c for c in candidates if not c["is_compound"]]
-
         is_priority = muscle in effective_priority
         is_lagging = muscle in photo_lagging
-        want_two = is_priority and len(candidates) >= 2 and profile["duration"] >= 45 and muscle in big_muscles
 
-        chosen_for_muscle = []
-        if want_two:
-            first_pool = compounds if compounds else candidates
-            ex1 = first_pool[(rotation_cycle + day_idx) % len(first_pool)]
-            chosen_for_muscle.append(ex1)
-            second_pool = [c for c in (isolations if isolations else candidates) if c["id"] != ex1["id"]]
-            if second_pool:
-                ex2 = second_pool[(rotation_cycle + day_idx) % len(second_pool)]
-                chosen_for_muscle.append(ex2)
+        pool = compounds if (compounds and muscle in big_muscles) else candidates
+        ex = pool[(rotation_cycle + day_idx) % len(pool)]
+        if ex["id"] in used_ids:
+            ex = next((c for c in candidates if c["id"] not in used_ids), ex)
+        if ex["id"] in used_ids:
+            continue
+
+        # Базовые и приоритетные группы получают 4 подхода, изолирующие/малые группы — 3 подхода для идеального баланса времени
+        if muscle in big_muscles and is_priority:
+            sets = min(4 if profile["duration"] <= 45 else 5, base_sets + 1)
+        elif muscle in big_muscles:
+            sets = base_sets
         else:
-            pool = compounds if (compounds and muscle in big_muscles) else candidates
-            ex1 = pool[(rotation_cycle + day_idx) % len(pool)]
-            chosen_for_muscle.append(ex1)
+            sets = 3 if is_priority else max(2, base_sets - 1)
 
-        for idx_in_m, ex in enumerate(chosen_for_muscle):
-            if ex["id"] in used_ids:
+        rest_sec = max(30, int(round((ex["rest_sec"] * rest_mult) / 5.0) * 5))
+        est_ex_time = sets * (35 + rest_sec) + 35
+
+        weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal, level)
+        rx = get_coaching_prescription(ex, muscle in user_priority, goal, is_photo_lagging=is_lagging)
+        used_ids.add(ex["id"])
+        selected_exercises.append({
+            "id": ex["id"],
+            "name": ex["name"],
+            "muscle": muscle,
+            "is_priority": is_priority,
+            "is_photo_lagging": is_lagging,
+            "is_compound": ex["is_compound"],
+            "is_timed": ex.get("is_timed", False),
+            "sets": sets,
+            "target_weight": weight,
+            "target_reps": t_reps,
+            "rep_min": r_min,
+            "rep_max": r_max,
+            "rest_sec": rest_sec,
+            "cues": ex["cues"],
+            "rir": rx["rir"],
+            "tempo": rx["tempo"],
+            "role": rx["role"],
+        })
+        total_time += est_ex_time
+
+    # ПРОХОД 2: Если длительность >= 60 мин и остаётся запас времени, добавляем 2-е упражнение под другим углом на главные приоритеты
+    if profile["duration"] >= 60:
+        for muscle in ordered_muscles:
+            if muscle not in effective_priority or muscle not in big_muscles:
+                continue
+            candidates = filter_exercises(profile, muscle)
+            isolations = [c for c in candidates if not c["is_compound"] and c["id"] not in used_ids]
+            fallback = [c for c in candidates if c["id"] not in used_ids]
+            second_pool = isolations if isolations else fallback
+            if not second_pool:
                 continue
 
-            sets = base_sets + (1 if (is_priority and idx_in_m == 0) else 0)
-            sets = min(4 if level != "advanced" else 5, sets)
+            ex2 = second_pool[(rotation_cycle + day_idx) % len(second_pool)]
+            sets = 3
+            rest_sec = max(30, int(round((ex2["rest_sec"] * rest_mult) / 5.0) * 5))
+            est_ex_time = sets * (35 + rest_sec) + 35
 
-            rest_sec = max(30, int(round((ex["rest_sec"] * rest_mult) / 5.0) * 5))
-            est_ex_time = sets * (40 + rest_sec) + 50
+            if total_time + est_ex_time > max_seconds:
+                break
 
-            if total_time + est_ex_time > max_seconds and len(selected_exercises) >= 4:
-                continue
-
-            weight, t_reps, r_min, r_max = get_exercise_targets(ex, goal, level)
-            rx = get_coaching_prescription(ex, muscle in user_priority, goal, is_photo_lagging=is_lagging)
-            used_ids.add(ex["id"])
+            is_lagging = muscle in photo_lagging
+            weight, t_reps, r_min, r_max = get_exercise_targets(ex2, goal, level)
+            rx = get_coaching_prescription(ex2, muscle in user_priority, goal, is_photo_lagging=is_lagging)
+            used_ids.add(ex2["id"])
             selected_exercises.append({
-                "id": ex["id"],
-                "name": ex["name"],
+                "id": ex2["id"],
+                "name": ex2["name"],
                 "muscle": muscle,
-                "is_priority": is_priority,
+                "is_priority": True,
                 "is_photo_lagging": is_lagging,
-                "is_compound": ex["is_compound"],
-                "is_timed": ex.get("is_timed", False),
+                "is_compound": ex2["is_compound"],
+                "is_timed": ex2.get("is_timed", False),
                 "sets": sets,
                 "target_weight": weight,
                 "target_reps": t_reps,
                 "rep_min": r_min,
                 "rep_max": r_max,
                 "rest_sec": rest_sec,
-                "cues": ex["cues"],
+                "cues": ex2["cues"],
                 "rir": rx["rir"],
                 "tempo": rx["tempo"],
-                "role": rx["role"],
+                "role": "🎯 Второй угол проработки приоритета",
             })
             total_time += est_ex_time
 
+    # Порядок в тренировке: 1) Тяжелая база на крупные мышцы -> 2) База/проработка плеч и рук -> 3) Изоляция -> 4) Пресс в финале
     selected_exercises.sort(
         key=lambda x: (
-            2 if x["muscle"] == "abs" else (0 if x["is_compound"] else 1),
+            3 if x["muscle"] == "abs" else (
+                0 if (x["is_compound"] and x["muscle"] in big_muscles) else (
+                    1 if x["is_compound"] else 2
+                )
+            ),
             0 if x["is_priority"] else 1,
         )
     )
@@ -1439,8 +1482,8 @@ async def onb_gender(call: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(Onboarding.age)
 async def onb_age(message: Message, state: FSMContext) -> None:
-    if not message.text or not message.text.strip().isdigit() or not (14 <= int(message.text.strip()) <= 90):
-        await message.answer("⚠️ Введи возраст целым числом от 14 до 90.")
+    if not message.text or not message.text.strip().isdigit() or not (12 <= int(message.text.strip()) <= 90):
+        await message.answer("⚠️ Введи возраст целым числом от 12 до 90.")
         return
     await state.update_data(age=int(message.text.strip()))
     await state.set_state(Onboarding.height)
